@@ -83,7 +83,11 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # User selected interfaces, proceed with discovery
-            self._selected_interfaces = user_input.get(CONF_INTERFACES)
+            # Extract just the interface names (strip IP addresses in parentheses)
+            selected = user_input.get(CONF_INTERFACES, [])
+            self._selected_interfaces = [
+                iface.split(" (")[0] for iface in selected
+            ]
             return await self.async_step_select_device()
 
         # Get available network interfaces
