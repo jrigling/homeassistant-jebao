@@ -35,6 +35,7 @@ class JebaoEntity(CoordinatorEntity[JebaoDataUpdateCoordinator]):
             name=f"Jebao {model}",
             manufacturer="Jebao",
             model=model,
+            serial_number=device_id,
             configuration_url=f"http://{host}:12416",
         )
 
