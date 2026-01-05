@@ -46,6 +46,8 @@ async def validate_connection(hass: HomeAssistant, host: str) -> dict[str, Any]:
             "device_id": device.device_id or "unknown",
             "model": device.model or MODEL_MDP20000,
             "state": device.state.name if device.state else "unknown",
+            "mac_address": None,  # Not available from direct connection
+            "firmware_version": None,  # Not currently exposed by device
         }
 
         return info
@@ -147,6 +149,8 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_HOST: device_info["ip"],
                     CONF_DEVICE_ID: device_info["device_id"],
                     CONF_MODEL: device_info["model"],
+                    "mac_address": device_info.get("mac"),
+                    "firmware_version": device_info.get("firmware_version"),
                 },
             )
 
@@ -194,6 +198,7 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "ip": d.ip_address,
                 "model": d.model,
                 "mac": d.mac_address,
+                "firmware_version": d.firmware_version,
             }
             for d in mdp_devices
         }
@@ -249,6 +254,8 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_HOST: host,
                         CONF_DEVICE_ID: info["device_id"],
                         CONF_MODEL: info["model"],
+                        "mac_address": info.get("mac_address"),
+                        "firmware_version": info.get("firmware_version"),
                     },
                 )
 

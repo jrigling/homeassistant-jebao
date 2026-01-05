@@ -33,6 +33,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
     device_id = entry.data.get("device_id")
     model = entry.data.get("model", "MDP-20000")
+    mac_address = entry.data.get("mac_address")
+    firmware_version = entry.data.get("firmware_version")
 
     _LOGGER.info("Setting up Jebao device at %s", host)
 
@@ -60,6 +62,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "host": host,
         "device_id": device_id,
         "model": model,
+        "mac_address": mac_address,
+        "firmware_version": firmware_version,
     }
 
     # Forward setup to platforms

@@ -29,6 +29,8 @@ async def async_setup_entry(
     device_id = data["device_id"]
     model = data["model"]
     host = data["host"]
+    mac_address = data.get("mac_address")
+    firmware_version = data.get("firmware_version")
 
     # Get or create coordinator
     if "coordinator" not in data:
@@ -45,7 +47,7 @@ async def async_setup_entry(
     # Create number entities
     async_add_entities(
         [
-            JebaoFeedDurationNumber(coordinator, device_id, model, host, device),
+            JebaoFeedDurationNumber(coordinator, device_id, model, host, device, mac_address, firmware_version),
         ]
     )
 
@@ -67,9 +69,11 @@ class JebaoFeedDurationNumber(JebaoEntity, NumberEntity):
         model: str,
         host: str,
         device,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
     ) -> None:
         """Initialize number entity."""
-        super().__init__(coordinator, device_id, model, host)
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
         self._device = device
         self._attr_unique_id = f"{device_id}_feed_duration"
         self._attr_name = "Feed duration"

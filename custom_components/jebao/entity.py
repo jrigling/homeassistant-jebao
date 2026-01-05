@@ -1,4 +1,6 @@
 """Base entity for Jebao integration."""
+from typing import Optional
+
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -17,6 +19,8 @@ class JebaoEntity(CoordinatorEntity[JebaoDataUpdateCoordinator]):
         device_id: str,
         model: str,
         host: str,
+        mac_address: Optional[str] = None,
+        firmware_version: Optional[str] = None,
     ) -> None:
         """Initialize entity."""
         super().__init__(coordinator)
@@ -25,10 +29,21 @@ class JebaoEntity(CoordinatorEntity[JebaoDataUpdateCoordinator]):
         self._model = model
         self._host = host
 
-        self._attr_device_info = DeviceInfo(
+        # Build device info
+        device_info = DeviceInfo(
             identifiers={(DOMAIN, device_id)},
             name=f"Jebao {model}",
             manufacturer="Jebao",
             model=model,
             configuration_url=f"http://{host}:12416",
         )
+
+        # Add MAC address as connection if available
+        if mac_address:
+            device_info["connections"] = {("mac", mac_address)}
+
+        # Add firmware version if available
+        if firmware_version:
+            device_info["sw_version"] = firmware_version
+
+        self._attr_device_info = device_info

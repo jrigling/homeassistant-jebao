@@ -28,6 +28,8 @@ async def async_setup_entry(
     device_id = data["device_id"]
     model = data["model"]
     host = data["host"]
+    mac_address = data.get("mac_address")
+    firmware_version = data.get("firmware_version")
 
     # Get or create coordinator
     if "coordinator" not in data:
@@ -44,8 +46,8 @@ async def async_setup_entry(
     # Create buttons
     async_add_entities(
         [
-            JebaoStartFeedButton(coordinator, device_id, model, host, device),
-            JebaoCancelFeedButton(coordinator, device_id, model, host, device),
+            JebaoStartFeedButton(coordinator, device_id, model, host, device, mac_address, firmware_version),
+            JebaoCancelFeedButton(coordinator, device_id, model, host, device, mac_address, firmware_version),
         ]
     )
 
@@ -62,9 +64,11 @@ class JebaoStartFeedButton(JebaoEntity, ButtonEntity):
         model: str,
         host: str,
         device,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
     ) -> None:
         """Initialize button."""
-        super().__init__(coordinator, device_id, model, host)
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
         self._device = device
         self._attr_unique_id = f"{device_id}_start_feed"
         self._attr_name = "Start feed"
@@ -95,9 +99,11 @@ class JebaoCancelFeedButton(JebaoEntity, ButtonEntity):
         model: str,
         host: str,
         device,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
     ) -> None:
         """Initialize button."""
-        super().__init__(coordinator, device_id, model, host)
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
         self._device = device
         self._attr_unique_id = f"{device_id}_cancel_feed"
         self._attr_name = "Cancel feed"

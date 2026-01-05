@@ -29,6 +29,8 @@ async def async_setup_entry(
     device_id = data["device_id"]
     model = data["model"]
     host = data["host"]
+    mac_address = data.get("mac_address")
+    firmware_version = data.get("firmware_version")
 
     # Get or create coordinator
     if "coordinator" not in data:
@@ -45,7 +47,7 @@ async def async_setup_entry(
     # Create binary sensors
     async_add_entities(
         [
-            JebaoFeedModeSensor(coordinator, device_id, model, host),
+            JebaoFeedModeSensor(coordinator, device_id, model, host, mac_address, firmware_version),
         ]
     )
 
@@ -62,9 +64,11 @@ class JebaoFeedModeSensor(JebaoEntity, BinarySensorEntity):
         device_id: str,
         model: str,
         host: str,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
     ) -> None:
         """Initialize sensor."""
-        super().__init__(coordinator, device_id, model, host)
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
         self._attr_unique_id = f"{device_id}_feed_mode"
         self._attr_name = "Feed mode"
 

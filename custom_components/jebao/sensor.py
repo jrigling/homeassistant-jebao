@@ -27,6 +27,8 @@ async def async_setup_entry(
     device_id = data["device_id"]
     model = data["model"]
     host = data["host"]
+    mac_address = data.get("mac_address")
+    firmware_version = data.get("firmware_version")
 
     # Get or create coordinator
     if "coordinator" not in data:
@@ -43,8 +45,8 @@ async def async_setup_entry(
     # Create sensors
     async_add_entities(
         [
-            JebaoSpeedSensor(coordinator, device_id, model, host),
-            JebaoStateSensor(coordinator, device_id, model, host),
+            JebaoSpeedSensor(coordinator, device_id, model, host, mac_address, firmware_version),
+            JebaoStateSensor(coordinator, device_id, model, host, mac_address, firmware_version),
         ]
     )
 
@@ -62,9 +64,11 @@ class JebaoSpeedSensor(JebaoEntity, SensorEntity):
         device_id: str,
         model: str,
         host: str,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
     ) -> None:
         """Initialize sensor."""
-        super().__init__(coordinator, device_id, model, host)
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
         self._attr_unique_id = f"{device_id}_speed"
         self._attr_name = "Speed"
         self._attr_icon = "mdi:speedometer"
@@ -86,9 +90,11 @@ class JebaoStateSensor(JebaoEntity, SensorEntity):
         device_id: str,
         model: str,
         host: str,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
     ) -> None:
         """Initialize sensor."""
-        super().__init__(coordinator, device_id, model, host)
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
         self._attr_unique_id = f"{device_id}_state"
         self._attr_name = "State"
         self._attr_icon = "mdi:information"
