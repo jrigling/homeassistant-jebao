@@ -152,10 +152,11 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             devices = await discover_devices(
-                timeout=5.0, interfaces=self._selected_interfaces
+                timeout=10.0, interfaces=self._selected_interfaces
             )
+            _LOGGER.info("Discovery completed, found %d device(s)", len(devices))
         except Exception as err:
-            _LOGGER.error("Discovery failed: %s", err)
+            _LOGGER.error("Discovery failed: %s", err, exc_info=True)
             errors["base"] = "discovery_failed"
             return self.async_show_form(
                 step_id="select_device",
@@ -164,7 +165,10 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         if not devices:
-            _LOGGER.warning("No devices found during discovery")
+            _LOGGER.warning(
+                "No devices found during discovery on interfaces: %s",
+                self._selected_interfaces
+            )
             self._discovery_attempted = True
             self._no_devices_reason = "no_devices"
             return await self.async_step_manual()
