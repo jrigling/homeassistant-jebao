@@ -1,0 +1,7 @@
+{
+  "name": "Jebao Aquarium Pumps",
+  "render_readme": true,
+  "domains": ["jebao"],
+  "iot_class": "Local Polling",
+  "homeassistant": "2024.1.0"
+}

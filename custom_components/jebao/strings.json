@@ -1,0 +1,86 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Jebao Pump Setup",
+        "description": "Choose how to add your Jebao pump",
+        "menu_options": {
+          "discover": "Automatic discovery",
+          "manual": "Manual configuration"
+        }
+      },
+      "discover": {
+        "title": "Network Discovery",
+        "description": "Select which network interfaces to scan for Jebao pumps.\n\nFound {interface_count} interfaces: {interfaces}",
+        "data": {
+          "interfaces": "Network interfaces to scan"
+        }
+      },
+      "select_device": {
+        "title": "Select Device",
+        "description": "Found {device_count} Jebao pump(s). Select one to add:",
+        "data": {
+          "device": "Pump"
+        }
+      },
+      "manual": {
+        "title": "Manual Setup",
+        "description": "Enter the IP address of your Jebao pump",
+        "data": {
+          "host": "IP Address"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to pump. Check the IP address and ensure the pump is powered on.",
+      "discovery_failed": "Discovery failed. Try manual configuration or check your network settings.",
+      "unknown": "An unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Jebao Options",
+        "data": {
+          "scan_interval": "Status update interval (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "fan": {
+      "pump": {
+        "name": "Pump"
+      }
+    },
+    "binary_sensor": {
+      "feed_mode": {
+        "name": "Feed mode"
+      }
+    },
+    "button": {
+      "start_feed": {
+        "name": "Start feed"
+      },
+      "cancel_feed": {
+        "name": "Cancel feed"
+      }
+    },
+    "number": {
+      "feed_duration": {
+        "name": "Feed duration"
+      }
+    },
+    "sensor": {
+      "speed": {
+        "name": "Speed"
+      },
+      "state": {
+        "name": "State"
+      }
+    }
+  }
+}
