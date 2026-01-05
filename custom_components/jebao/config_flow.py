@@ -63,6 +63,8 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize config flow."""
         self._discovered_devices: dict[str, Any] = {}
         self._selected_interfaces: list[str] | None = None
+        self._discovery_attempted: bool = False
+        self._no_devices_reason: str | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -159,6 +161,8 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if not devices:
             _LOGGER.warning("No devices found during discovery")
+            self._discovery_attempted = True
+            self._no_devices_reason = "no_devices"
             return await self.async_step_manual()
 
         # Filter to MDP-20000 devices (MD-4.4 support can be added later)
@@ -166,6 +170,8 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if not mdp_devices:
             _LOGGER.warning("No MDP-20000 devices found")
+            self._discovery_attempted = True
+            self._no_devices_reason = "no_mdp20000"
             return await self.async_step_manual()
 
         # Store discovered devices
@@ -240,6 +246,25 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected error: %s", err)
                 errors["base"] = "unknown"
 
+        # Prepare description placeholders based on discovery context
+        description_placeholders = {}
+        if self._discovery_attempted:
+            if self._no_devices_reason == "no_devices":
+                description_placeholders["discovery_result"] = (
+                    "⚠️ No Jebao pumps were found during automatic discovery."
+                )
+            elif self._no_devices_reason == "no_mdp20000":
+                description_placeholders["discovery_result"] = (
+                    "⚠️ No MDP-20000 pumps were found during automatic discovery. "
+                    "Other Jebao models may not be supported yet."
+                )
+            else:
+                description_placeholders["discovery_result"] = (
+                    "⚠️ Automatic discovery did not find any pumps."
+                )
+        else:
+            description_placeholders["discovery_result"] = ""
+
         # Show manual configuration form
         return self.async_show_form(
             step_id="manual",
@@ -248,6 +273,7 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_HOST): str,
                 }
             ),
+            description_placeholders=description_placeholders,
             errors=errors,
         )
 
