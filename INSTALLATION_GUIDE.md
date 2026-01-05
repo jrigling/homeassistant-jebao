@@ -1,8 +1,8 @@
 # Jebao Home Assistant Integration - Installation Guide
 
-## Current Status: ✅ READY FOR LOCAL TESTING
+## Current Status: ✅ READY FOR TESTING
 
-The integration is ready for testing with HACS, but requires one additional step for the Python library.
+The integration is ready for testing with HACS. When installed via HACS, the Python library is automatically installed from GitHub.
 
 ## Prerequisites
 
@@ -23,42 +23,15 @@ The integration is ready for testing with HACS, but requires one additional step
    - Category: Integration
    - Click "Add"
 
-2. **Install Python Library**
-
-   The integration requires the `python-jebao` library. Since it's not yet on PyPI, install it manually in your Home Assistant environment:
-
-   **For Home Assistant OS/Supervised:**
-   ```bash
-   # SSH into Home Assistant
-   # Enter the container
-   docker exec -it homeassistant bash
-
-   # Install the library from GitHub
-   pip install git+https://github.com/jrigling/python-jebao.git@main
-   ```
-
-   **For Home Assistant Core (venv):**
-   ```bash
-   # Activate Home Assistant venv
-   source /path/to/homeassistant/venv/bin/activate
-
-   # Install the library from GitHub
-   pip install git+https://github.com/jrigling/python-jebao.git@main
-   ```
-
-   **For Home Assistant Container:**
-   ```bash
-   # Install in the container
-   docker exec homeassistant pip install git+https://github.com/jrigling/python-jebao.git@main
-   ```
-
-3. **Install the Integration via HACS**
+2. **Install the Integration via HACS**
    - Go to HACS > Integrations
    - Search for "Jebao"
    - Click "Download"
    - Restart Home Assistant
 
-4. **Add Integration**
+   **Note:** The `python-jebao` library will be automatically installed from GitHub during this step.
+
+3. **Add Integration**
    - Go to Settings > Devices & Services
    - Click "+ Add Integration"
    - Search for "Jebao"
@@ -66,19 +39,35 @@ The integration is ready for testing with HACS, but requires one additional step
 
 ### Option 2: Manual Installation (For Development)
 
-1. **Copy Integration Files**
+**Note:** Manual installation requires you to install the Python library separately.
+
+1. **Install Python Library**
+
+   **For Home Assistant OS/Supervised:**
    ```bash
-   # Copy to Home Assistant custom_components directory
-   # First clone the repository
+   # SSH into Home Assistant, then:
+   docker exec -it homeassistant bash
+   pip install git+https://github.com/jrigling/python-jebao.git@main
+   exit
+   ```
+
+   **For Home Assistant Core (venv):**
+   ```bash
+   source /path/to/homeassistant/venv/bin/activate
+   pip install git+https://github.com/jrigling/python-jebao.git@main
+   ```
+
+   **For Home Assistant Container:**
+   ```bash
+   docker exec homeassistant pip install git+https://github.com/jrigling/python-jebao.git@main
+   ```
+
+2. **Copy Integration Files**
+   ```bash
+   # Clone the repository and copy to HA config directory
    git clone https://github.com/jrigling/homeassistant-jebao.git
    cp -r homeassistant-jebao/custom_components/jebao \
          /path/to/homeassistant/config/custom_components/
-   ```
-
-2. **Install Python Library**
-   ```bash
-   # In Home Assistant environment
-   pip install git+https://github.com/jrigling/python-jebao.git@main
    ```
 
 3. **Restart Home Assistant**

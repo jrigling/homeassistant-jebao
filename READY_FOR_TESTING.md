@@ -37,11 +37,15 @@ The Home Assistant integration is **ready for testing** with one prerequisite st
 - ✅ Troubleshooting guide
 - ✅ Automation examples
 
-## One Prerequisite Step ⚠️
+## Installation Methods
 
-**You need to install the `python-jebao` library** in your Home Assistant environment before loading the integration.
+### Option A: HACS (Recommended - No Manual Steps)
 
-### Quick Install (Choose your HA setup):
+When installing via HACS, Home Assistant will **automatically** install the `python-jebao` library from GitHub. No manual installation needed!
+
+### Option B: Manual Installation (Requires Manual Library Install)
+
+If installing manually (copying files), you need to install the library first:
 
 **Home Assistant OS/Supervised:**
 ```bash
@@ -63,6 +67,24 @@ docker exec homeassistant pip install git+https://github.com/jrigling/python-jeb
 
 ## Testing Steps
 
+### For HACS Installation:
+
+### 1. Add Custom Repository to HACS
+   - Open HACS in Home Assistant
+   - Click the 3 dots menu (top right)
+   - Select "Custom repositories"
+   - Add repository URL: `https://github.com/jrigling/homeassistant-jebao`
+   - Category: Integration
+   - Click "Add"
+
+### 2. Install via HACS
+   - Go to HACS > Integrations
+   - Search for "Jebao"
+   - Click "Download"
+   - Restart Home Assistant
+
+### For Manual Installation:
+
 ### 1. Install Python Library (see above)
 
 ### 2. Copy Integration to Home Assistant
@@ -74,9 +96,9 @@ cp -r homeassistant-jebao/custom_components/jebao \
       /path/to/homeassistant/config/custom_components/
 ```
 
-Or use HACS custom repository if pushed to GitHub.
-
 ### 3. Restart Home Assistant
+
+### After Installation (Both Methods):
 
 ### 4. Add Integration
 
