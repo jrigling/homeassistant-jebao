@@ -2,7 +2,7 @@
 
 ## Current Status: ✅ READY FOR TESTING
 
-The integration is ready for testing with HACS. When installed via HACS, the Python library is automatically installed from GitHub.
+The integration is ready for testing with HACS. When installed via HACS, the Python library is automatically installed from PyPI.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ The integration is ready for testing with HACS. When installed via HACS, the Pyt
    - Click "Download"
    - Restart Home Assistant
 
-   **Note:** The `python-jebao` library will be automatically installed from GitHub during this step.
+   **Note:** The `python-jebao` library (v0.1.0) will be automatically installed from PyPI during this step.
 
 3. **Add Integration**
    - Go to Settings > Devices & Services
@@ -47,19 +47,19 @@ The integration is ready for testing with HACS. When installed via HACS, the Pyt
    ```bash
    # SSH into Home Assistant, then:
    docker exec -it homeassistant bash
-   pip install git+https://github.com/jrigling/python-jebao.git@main
+   pip install python-jebao==0.1.0
    exit
    ```
 
    **For Home Assistant Core (venv):**
    ```bash
    source /path/to/homeassistant/venv/bin/activate
-   pip install git+https://github.com/jrigling/python-jebao.git@main
+   pip install python-jebao==0.1.0
    ```
 
    **For Home Assistant Container:**
    ```bash
-   docker exec homeassistant pip install git+https://github.com/jrigling/python-jebao.git@main
+   docker exec homeassistant pip install python-jebao==0.1.0
    ```
 
 2. **Copy Integration Files**

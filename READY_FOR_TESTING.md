@@ -41,7 +41,7 @@ The Home Assistant integration is **ready for testing** with one prerequisite st
 
 ### Option A: HACS (Recommended - No Manual Steps)
 
-When installing via HACS, Home Assistant will **automatically** install the `python-jebao` library from GitHub. No manual installation needed!
+When installing via HACS, Home Assistant will **automatically** install the `python-jebao` library (v0.1.0) from PyPI. No manual installation needed!
 
 ### Option B: Manual Installation (Requires Manual Library Install)
 
@@ -51,18 +51,18 @@ If installing manually (copying files), you need to install the library first:
 ```bash
 # SSH into Home Assistant, then:
 docker exec -it homeassistant bash
-pip install git+https://github.com/jrigling/python-jebao.git@main
+pip install python-jebao==0.1.0
 ```
 
 **Home Assistant Core (venv):**
 ```bash
 source /path/to/ha/venv/bin/activate
-pip install git+https://github.com/jrigling/python-jebao.git@main
+pip install python-jebao==0.1.0
 ```
 
 **Home Assistant Container:**
 ```bash
-docker exec homeassistant pip install git+https://github.com/jrigling/python-jebao.git@main
+docker exec homeassistant pip install python-jebao==0.1.0
 ```
 
 ## Testing Steps
@@ -176,7 +176,7 @@ Once added, you should see:
 
 ### "Module 'jebao' has no attribute 'MDP20000Device'"
 - Python library not installed correctly
-- Install with: `pip install git+https://github.com/jrigling/python-jebao.git@main`
+- Install with: `pip install python-jebao==0.1.0`
 - Restart Home Assistant
 
 ### Commands timeout or fail
@@ -227,9 +227,9 @@ Integration is working if:
 
 Once testing confirms it works:
 
-1. **Publish Python Library to PyPI**
-   - Remove need for manual installation
-   - Home Assistant will auto-install from PyPI
+1. ✅ **Python Library Published to PyPI**
+   - Library is now available at https://pypi.org/project/python-jebao/
+   - Home Assistant auto-installs from PyPI
 
 2. **Submit to HACS Default**
    - Make available in HACS default repository
