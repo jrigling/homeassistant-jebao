@@ -88,6 +88,11 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._selected_interfaces = [
                 iface.split(" (")[0] for iface in selected
             ]
+            _LOGGER.debug(
+                "User selected interfaces: %s -> parsed as: %s",
+                selected,
+                self._selected_interfaces,
+            )
             return await self.async_step_select_device()
 
         # Get available network interfaces
