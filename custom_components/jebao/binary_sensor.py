@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_DEVICE_ID, CONF_HOST, CONF_MODEL, DOMAIN
+from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
 from .coordinator import JebaoDataUpdateCoordinator
 from .entity import JebaoEntity
 

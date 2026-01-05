@@ -15,7 +15,7 @@ from homeassistant.util.percentage import (
     ranged_value_to_percentage,
 )
 
-from .const import CONF_DEVICE_ID, CONF_HOST, CONF_MODEL, DOMAIN
+from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
 from .coordinator import JebaoDataUpdateCoordinator
 from .entity import JebaoEntity
 
