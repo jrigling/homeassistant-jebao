@@ -36,9 +36,9 @@ async def async_setup_entry(
     if "coordinator" not in data:
         scan_interval = entry.options.get("scan_interval")
         if scan_interval:
-            coordinator = JebaoDataUpdateCoordinator(hass, device, scan_interval)
+            coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id, scan_interval)
         else:
-            coordinator = JebaoDataUpdateCoordinator(hass, device)
+            coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id)
         await coordinator.async_config_entry_first_refresh()
         data["coordinator"] = coordinator
     else:
