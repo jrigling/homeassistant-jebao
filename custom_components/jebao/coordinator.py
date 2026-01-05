@@ -34,6 +34,16 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict:
         """Fetch data from device."""
         try:
+            # Check if connection is alive, reconnect if needed
+            if not self.device.is_connected:
+                _LOGGER.warning("Connection lost, attempting to reconnect...")
+                try:
+                    await self.device.connect(timeout=5.0)
+                    _LOGGER.info("Reconnected successfully")
+                except JebaoError as err:
+                    _LOGGER.error("Reconnection failed: %s", err)
+                    raise UpdateFailed(f"Failed to reconnect: {err}") from err
+
             await self.device.update()
 
             return {
