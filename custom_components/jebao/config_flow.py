@@ -191,6 +191,25 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._no_devices_reason = "no_mdp20000"
             return await self.async_step_manual()
 
+        # Filter out devices already configured in Home Assistant
+        configured_ids = {
+            entry.unique_id
+            for entry in self._async_current_entries()
+        }
+        new_devices = [d for d in mdp_devices if d.device_id not in configured_ids]
+        _LOGGER.debug(
+            "Discovery found %d device(s), %d already configured, %d new",
+            len(mdp_devices),
+            len(mdp_devices) - len(new_devices),
+            len(new_devices),
+        )
+
+        if not new_devices:
+            _LOGGER.info("All discovered devices are already configured")
+            return self.async_abort(reason="already_configured")
+
+        mdp_devices = new_devices
+
         # Store discovered devices
         self._discovered_devices = {
             f"{d.device_id}_{d.ip_address}": {
