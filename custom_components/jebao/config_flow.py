@@ -13,6 +13,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
     CONF_DEVICE_ID,
@@ -247,6 +248,79 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "device_count": str(len(mdp_devices)),
             },
             errors=errors,
+        )
+
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> FlowResult:
+        """Handle DHCP discovery - used for IP recovery on registered devices."""
+        mac_normalized = discovery_info.macaddress.lower().replace(":", "")
+        ip = discovery_info.ip
+
+        for entry in self._async_current_entries():
+            stored_mac = (entry.data.get("mac_address") or "").lower().replace(":", "")
+            if stored_mac and stored_mac == mac_normalized:
+                if entry.data.get(CONF_HOST) != ip:
+                    _LOGGER.info(
+                        "DHCP recovery: updating %s IP from %s to %s",
+                        entry.title,
+                        entry.data.get(CONF_HOST),
+                        ip,
+                    )
+                    self.hass.config_entries.async_update_entry(
+                        entry, data={**entry.data, CONF_HOST: ip}
+                    )
+                    self.hass.async_create_task(
+                        self.hass.config_entries.async_reload(entry.entry_id)
+                    )
+                return self.async_abort(reason="already_configured")
+
+        # Unknown MAC - we don't try to auto-create entries from DHCP alone
+        # (need pump-side validation; UDP discovery covers new pumps).
+        return self.async_abort(reason="not_jebao_device")
+
+    async def async_step_integration_discovery(
+        self, discovery_info: dict[str, Any]
+    ) -> FlowResult:
+        """Handle integration discovery (periodic UDP scan finding new pumps)."""
+        device_id = discovery_info["device_id"]
+        ip = discovery_info["ip"]
+
+        await self.async_set_unique_id(device_id)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: ip})
+
+        self._discovered_devices = {device_id: discovery_info}
+        self.context["title_placeholders"] = {
+            "name": f"{discovery_info['model']} ({ip})"
+        }
+        return await self.async_step_confirm_discovery()
+
+    async def async_step_confirm_discovery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask the user to confirm adding a discovered pump."""
+        device_id = self.unique_id
+        info = self._discovered_devices[device_id]
+
+        if user_input is not None:
+            return self.async_create_entry(
+                title=f"{info['model']} ({info['ip']})",
+                data={
+                    CONF_HOST: info["ip"],
+                    CONF_DEVICE_ID: device_id,
+                    CONF_MODEL: info["model"],
+                    "mac_address": info.get("mac_address"),
+                    "firmware_version": info.get("firmware_version"),
+                },
+            )
+
+        return self.async_show_form(
+            step_id="confirm_discovery",
+            description_placeholders={
+                "model": info["model"],
+                "device_id": device_id,
+                "ip": info["ip"],
+            },
         )
 
     async def async_step_manual(

@@ -1,16 +1,19 @@
 """The Jebao integration."""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from jebao import JebaoError, MDP20000Device
+from jebao import JebaoError, MDP20000Device, discover_devices
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY, ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 
@@ -26,6 +29,70 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SENSOR,
 ]
+
+# Periodic background discovery interval (UDP broadcast scan)
+DISCOVERY_INTERVAL = timedelta(minutes=5)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up periodic background discovery for Jebao pumps."""
+
+    async def _periodic_discovery(_now=None) -> None:
+        try:
+            devices = await discover_devices(timeout=5.0)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Periodic discovery failed: %s", err)
+            return
+
+        entries = hass.config_entries.async_entries(DOMAIN)
+        entries_by_id = {entry.unique_id: entry for entry in entries}
+
+        for device in devices:
+            if not device.is_mdp20000:
+                continue
+
+            existing = entries_by_id.get(device.device_id)
+            if existing is not None:
+                # Backfill missing MAC / update IP if it drifted (DHCP discovery is the
+                # preferred IP-recovery path, but periodic scan is a belt-and-suspenders).
+                updates: dict[str, Any] = {}
+                if not existing.data.get("mac_address") and device.mac_address:
+                    updates["mac_address"] = device.mac_address
+                if existing.data.get(CONF_HOST) != device.ip_address:
+                    updates[CONF_HOST] = device.ip_address
+                if updates:
+                    _LOGGER.info(
+                        "Updating Jebao entry %s from periodic discovery: %s",
+                        existing.title,
+                        updates,
+                    )
+                    hass.config_entries.async_update_entry(
+                        existing, data={**existing.data, **updates}
+                    )
+                continue
+
+            # New, unconfigured pump - kick off a discovery flow so it appears
+            # in Settings -> Devices & Services as "Discovered".
+            hass.async_create_task(
+                hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": SOURCE_INTEGRATION_DISCOVERY},
+                    data={
+                        "device_id": device.device_id,
+                        "ip": device.ip_address,
+                        "model": device.model,
+                        "mac_address": device.mac_address,
+                        "firmware_version": device.firmware_version,
+                    },
+                )
+            )
+
+    # Fire once shortly after startup, then on the regular interval.
+    hass.async_create_background_task(
+        _periodic_discovery(), "jebao_initial_discovery"
+    )
+    async_track_time_interval(hass, _periodic_discovery, DISCOVERY_INTERVAL)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
