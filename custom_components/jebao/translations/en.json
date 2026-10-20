@@ -78,6 +78,9 @@
     "number": {
       "feed_duration": {
         "name": "Feed duration"
+      },
+      "speed": {
+        "name": "Speed setting"
       }
     },
     "sensor": {

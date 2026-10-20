@@ -51,10 +51,28 @@ async def validate_connection(hass: HomeAssistant, host: str) -> dict[str, Any]:
             "firmware_version": None,  # Not currently exposed by device
         }
 
-        return info
-
     finally:
         await device.disconnect()
+
+    # A direct connection doesn't reveal the pump's ID, MAC, or model, so look the
+    # host up via UDP discovery. Without this the entry is stored as device_id
+    # "unknown" and labeled MDP-20000 whatever the pump is.
+    try:
+        devices = await discover_devices(timeout=3.0)
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.debug("Discovery lookup for %s failed: %s", host, err)
+        devices = []
+    for found in devices:
+        if found.ip_address == host:
+            info.update(
+                device_id=found.device_id,
+                model=found.model,
+                mac_address=found.mac_address,
+                firmware_version=found.firmware_version,
+            )
+            break
+
+    return info
 
 
 class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -423,15 +441,11 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> JebaoOptionsFlow:
         """Get options flow handler."""
-        return JebaoOptionsFlow(config_entry)
+        return JebaoOptionsFlow()
 
 
 class JebaoOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Jebao."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

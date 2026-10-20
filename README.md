@@ -14,6 +14,7 @@ Home Assistant custom integration for Jebao aquarium pumps with local network co
 ## Supported Models
 
 - **Jebao MDP-20000** - Variable-speed circulation pump
+- **Jebao MDP-15000** - Variable-speed circulation pump (same protocol as the MDP-20000)
 - **Jebao MD-4.4** - 4-channel dosing pump (planned)
 
 ## Installation

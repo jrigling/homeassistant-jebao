@@ -15,7 +15,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
 
 if TYPE_CHECKING:
     from homeassistant.helpers.entity import Entity
@@ -46,12 +46,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
         entries = hass.config_entries.async_entries(DOMAIN)
         entries_by_id = {entry.unique_id: entry for entry in entries}
+        # Entries added by IP before the pump's ID could be looked up
+        entries_by_host = {
+            entry.data.get(CONF_HOST): entry
+            for entry in entries
+            if entry.data.get(CONF_DEVICE_ID) in (None, "unknown")
+        }
 
         for device in devices:
             if not device.is_mdp20000:
                 continue
 
-            existing = entries_by_id.get(device.device_id)
+            existing = entries_by_id.get(device.device_id) or entries_by_host.get(
+                device.ip_address
+            )
             if existing is not None:
                 # Backfill missing MAC / update IP if it drifted (DHCP discovery is the
                 # preferred IP-recovery path, but periodic scan is a belt-and-suspenders).
@@ -60,15 +68,27 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     updates["mac_address"] = device.mac_address
                 if existing.data.get(CONF_HOST) != device.ip_address:
                     updates[CONF_HOST] = device.ip_address
+                old_model = existing.data.get(CONF_MODEL)
+                model_changed = bool(device.model) and old_model != device.model
+                if model_changed:
+                    updates[CONF_MODEL] = device.model
                 if updates:
                     _LOGGER.info(
                         "Updating Jebao entry %s from periodic discovery: %s",
                         existing.title,
                         updates,
                     )
+                    title = existing.title
+                    if model_changed and old_model and title.startswith(f"{old_model} "):
+                        title = device.model + title[len(old_model):]
                     hass.config_entries.async_update_entry(
-                        existing, data={**existing.data, **updates}
+                        existing, title=title, data={**existing.data, **updates}
                     )
+                    if model_changed:
+                        # Device and entity names are built from the model at setup
+                        hass.async_create_task(
+                            hass.config_entries.async_reload(existing.entry_id)
+                        )
                 continue
 
             # New, unconfigured pump - kick off a discovery flow so it appears

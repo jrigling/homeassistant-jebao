@@ -7,7 +7,7 @@ from jebao import JebaoError
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -48,6 +48,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             JebaoFeedDurationNumber(coordinator, device_id, model, host, device, mac_address, firmware_version),
+            JebaoSpeedNumber(coordinator, device_id, model, host, device, mac_address, firmware_version),
         ]
     )
 
@@ -96,3 +97,49 @@ class JebaoFeedDurationNumber(JebaoEntity, NumberEntity):
 
         except JebaoError as err:
             _LOGGER.error("Failed to set feed duration: %s", err)
+
+
+class JebaoSpeedNumber(JebaoEntity, NumberEntity):
+    """Number entity for the pump speed in the device's own 30-100% units.
+
+    The fan entity rescales 30-100 onto 0-100 (speed 30 shows as 1%), which
+    doesn't match the Jebao app; this sets the speed exactly as the app does.
+    """
+
+    _attr_translation_key = "speed"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 30
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+
+    def __init__(
+        self,
+        coordinator: JebaoDataUpdateCoordinator,
+        device_id: str,
+        model: str,
+        host: str,
+        device,
+        mac_address: str | None = None,
+        firmware_version: str | None = None,
+    ) -> None:
+        """Initialize number entity."""
+        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
+        self._device = device
+        self._attr_unique_id = f"{device_id}_speed_setting"
+        self._attr_name = "Speed setting"
+        self._attr_icon = "mdi:speedometer"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current speed."""
+        return self.coordinator.data.get("speed")
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the pump speed."""
+        try:
+            await self._device.set_speed(int(value))
+            await self.coordinator.async_request_refresh()
+
+        except JebaoError as err:
+            _LOGGER.error("Failed to set pump speed: %s", err)
