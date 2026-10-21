@@ -114,6 +114,9 @@ def entry_model(entry: ConfigEntry) -> str:
 
 async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload when options or discovered data change, so names and settings apply."""
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if data is not None and data["entry_snapshot"] == (dict(entry.data), dict(entry.options)):
+        return  # Title-only change (e.g. setup renaming it); nothing to apply
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -169,6 +172,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "mac_address": mac_address,
         "firmware_version": firmware_version,
         "coordinator": coordinator,
+        # What this setup was built from, so the update listener can skip reloads
+        "entry_snapshot": (dict(entry.data), dict(entry.options)),
     }
 
     # Keep a "<model> (<ip>)" title in step with the model (before the listener,
