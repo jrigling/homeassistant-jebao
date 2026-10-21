@@ -285,11 +285,9 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         entry.data.get(CONF_HOST),
                         ip,
                     )
+                    # The entry's update listener reloads it
                     self.hass.config_entries.async_update_entry(
                         entry, data={**entry.data, CONF_HOST: ip}
-                    )
-                    self.hass.async_create_task(
-                        self.hass.config_entries.async_reload(entry.entry_id)
                     )
                 return self.async_abort(reason="already_configured")
 
@@ -454,15 +452,21 @@ class JebaoOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        from .const import DEFAULT_SCAN_INTERVAL
+        from .const import DEFAULT_SCAN_INTERVAL, SELECTABLE_MODELS
+
+        entry = self.config_entry
+        model = entry.options.get(CONF_MODEL) or entry.data.get(CONF_MODEL)
+        if model not in SELECTABLE_MODELS:
+            model = MODEL_MDP20000
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_MODEL, default=model): vol.In(SELECTABLE_MODELS),
                     vol.Optional(
                         "scan_interval",
-                        default=self.config_entry.options.get(
+                        default=entry.options.get(
                             "scan_interval", DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),

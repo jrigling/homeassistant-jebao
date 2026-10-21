@@ -15,7 +15,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
+from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN, MODEL_MDP20000, SELECTABLE_MODELS
+from .coordinator import JebaoDataUpdateCoordinator
 
 if TYPE_CHECKING:
     from homeassistant.helpers.entity import Entity
@@ -68,9 +69,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                     updates["mac_address"] = device.mac_address
                 if existing.data.get(CONF_HOST) != device.ip_address:
                     updates[CONF_HOST] = device.ip_address
-                old_model = existing.data.get(CONF_MODEL)
-                model_changed = bool(device.model) and old_model != device.model
-                if model_changed:
+                if device.model and existing.data.get(CONF_MODEL) != device.model:
                     updates[CONF_MODEL] = device.model
                 if updates:
                     _LOGGER.info(
@@ -78,17 +77,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         existing.title,
                         updates,
                     )
-                    title = existing.title
-                    if model_changed and old_model and title.startswith(f"{old_model} "):
-                        title = device.model + title[len(old_model):]
+                    # The update listener reloads the entry, so names follow the model
                     hass.config_entries.async_update_entry(
-                        existing, title=title, data={**existing.data, **updates}
+                        existing, data={**existing.data, **updates}
                     )
-                    if model_changed:
-                        # Device and entity names are built from the model at setup
-                        hass.async_create_task(
-                            hass.config_entries.async_reload(existing.entry_id)
-                        )
                 continue
 
             # New, unconfigured pump - kick off a discovery flow so it appears
@@ -115,11 +107,21 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+def entry_model(entry: ConfigEntry) -> str:
+    """Return the entry's model: the user's choice in options, else discovery's."""
+    return entry.options.get(CONF_MODEL) or entry.data.get(CONF_MODEL, MODEL_MDP20000)
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload when options or discovered data change, so names and settings apply."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Jebao from a config entry."""
     host = entry.data[CONF_HOST]
     device_id = entry.data.get("device_id")
-    model = entry.data.get("model", "MDP-20000")
+    model = entry_model(entry)
     mac_address = entry.data.get("mac_address")
     firmware_version = entry.data.get("firmware_version")
 
@@ -142,6 +144,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await device.disconnect()
         raise ConfigEntryNotReady(f"Failed to connect: {err}") from err
 
+    # One coordinator per entry, shared by all platforms. Platforms used to each
+    # create their own (they set up concurrently, so the "if not in data" check
+    # raced), which polled the pump several times per interval and, when the
+    # connection dropped, sent several simultaneous logins that pumps reject.
+    scan_interval = entry.options.get("scan_interval")
+    if scan_interval:
+        coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id, scan_interval)
+    else:
+        coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        await device.disconnect()
+        raise
+
     # Store device instance
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
@@ -151,7 +168,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "model": model,
         "mac_address": mac_address,
         "firmware_version": firmware_version,
+        "coordinator": coordinator,
     }
+
+    # Keep a "<model> (<ip>)" title in step with the model (before the listener,
+    # so this doesn't trigger a reload)
+    for known in SELECTABLE_MODELS:
+        if known != model and entry.title.startswith(f"{known} "):
+            hass.config_entries.async_update_entry(
+                entry, title=model + entry.title[len(known):]
+            )
+            break
+
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
 
     # Forward setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -177,7 +206,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def get_device_info(entry: ConfigEntry) -> DeviceInfo:
     """Get device info for device registry."""
     device_id = entry.data.get("device_id", "unknown")
-    model = entry.data.get("model", "MDP-20000")
+    model = entry_model(entry)
     host = entry.data[CONF_HOST]
 
     return DeviceInfo(

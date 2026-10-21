@@ -39,15 +39,7 @@ async def async_setup_entry(
     mac_address = data.get("mac_address")
     firmware_version = data.get("firmware_version")
 
-    # Create coordinator
-    scan_interval = entry.options.get("scan_interval")
-    if scan_interval:
-        coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id, scan_interval)
-    else:
-        coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id)
-
-    # Fetch initial data
-    await coordinator.async_config_entry_first_refresh()
+    coordinator: JebaoDataUpdateCoordinator = data["coordinator"]
 
     # Create fan entity
     async_add_entities([JebaoPumpFan(coordinator, device_id, model, host, device, mac_address, firmware_version)])
