@@ -49,7 +49,7 @@
     "step": {
       "init": {
         "title": "Jebao Options",
-        "description": "Pump model: discovery can't always tell an MDP-15000 from an MDP-20000, so correct it here if needed.\n\nStatus update interval: lower values provide more responsive updates but increase network traffic. Recommended: 30 seconds (default)",
+        "description": "Pump model: discovery can't always tell these models apart (MDP-20000, MDP-15000, MDP-3500 and likely MDP-2500 can report the same product key), so correct it here if needed.\n\nStatus update interval: lower values provide more responsive updates but increase network traffic. Recommended: 30 seconds (default)",
         "data": {
           "model": "Pump model",
           "scan_interval": "Status update interval (10-300 seconds)"

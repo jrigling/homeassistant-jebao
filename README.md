@@ -15,7 +15,12 @@ Home Assistant custom integration for Jebao aquarium pumps with local network co
 
 - **Jebao MDP-20000** - Variable-speed circulation pump
 - **Jebao MDP-15000** - Variable-speed circulation pump (same protocol as the MDP-20000)
+- **Jebao MDP-3500** - Variable-speed circulation pump (same protocol; reported working in [#2](https://github.com/jrigling/homeassistant-jebao/issues/2))
+- **Jebao MDP-2500** - Likely the same protocol ([#1](https://github.com/jrigling/homeassistant-jebao/issues/1), unconfirmed)
 - **Jebao MD-4.4** - 4-channel dosing pump (planned)
+
+Some of these report the same product key, so discovery may label a pump MDP-20000. Pick the right model
+under **Configure** (Settings → Devices & services → Jebao).
 
 ## Installation
 
@@ -277,7 +282,8 @@ After adding the integration, you can configure:
 1. Go to **Settings** → **Devices & Services**
 2. Find **Jebao** integration
 3. Click **Configure**
-4. Adjust **scan_interval** (10-300 seconds, default: 30)
+4. Set the **Pump model** if discovery got it wrong
+5. Adjust **scan_interval** (10-300 seconds, default: 30)
 
 Lower intervals = more responsive, but more network traffic.
 
