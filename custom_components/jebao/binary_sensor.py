@@ -1,21 +1,69 @@
 """Binary sensor platform for Jebao."""
 from __future__ import annotations
 
-import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from jebao import PumpStatus
+from jebao.datapoints import FAULT_NAMES
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
+    BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
+from .const import DOMAIN
 from .coordinator import JebaoDataUpdateCoordinator
 from .entity import JebaoEntity
 
-_LOGGER = logging.getLogger(__name__)
+
+@dataclass(frozen=True, kw_only=True)
+class JebaoBinarySensorDescription(BinarySensorEntityDescription):
+    """Describes a Jebao binary sensor."""
+
+    is_on: Callable[[PumpStatus], bool]
+
+
+def _fault(name: str) -> JebaoBinarySensorDescription:
+    return JebaoBinarySensorDescription(
+        key=f"fault_{name}",
+        translation_key=f"fault_{name}",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        is_on=lambda status: name in status.faults,
+    )
+
+
+DESCRIPTIONS: tuple[JebaoBinarySensorDescription, ...] = (
+    JebaoBinarySensorDescription(
+        key="feed_mode",
+        translation_key="feed_mode",
+        device_class=BinarySensorDeviceClass.RUNNING,
+        is_on=lambda status: status.feed_switch,
+    ),
+    JebaoBinarySensorDescription(
+        key="problem",
+        translation_key="problem",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        is_on=lambda status: bool(status.faults),
+    ),
+    # The app never uses this one; 0 = front-panel control, 1 = wireless control
+    JebaoBinarySensorDescription(
+        key="wireless_control",
+        translation_key="wireless_control",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        is_on=lambda status: status.wireless_mode,
+    ),
+    *(_fault(name) for name in FAULT_NAMES),
+)
 
 
 async def async_setup_entry(
@@ -24,55 +72,32 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Jebao binary sensors from config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    device = data["device"]
-    device_id = data["device_id"]
-    model = data["model"]
-    host = data["host"]
-    mac_address = data.get("mac_address")
-    firmware_version = data.get("firmware_version")
-
-    # Get or create coordinator
-    if "coordinator" not in data:
-        scan_interval = entry.options.get("scan_interval")
-        if scan_interval:
-            coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id, scan_interval)
-        else:
-            coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id)
-        await coordinator.async_config_entry_first_refresh()
-        data["coordinator"] = coordinator
-    else:
-        coordinator = data["coordinator"]
-
-    # Create binary sensors
-    async_add_entities(
-        [
-            JebaoFeedModeSensor(coordinator, device_id, model, host, mac_address, firmware_version),
-        ]
-    )
+    coordinator: JebaoDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    async_add_entities(JebaoBinarySensor(coordinator, description) for description in DESCRIPTIONS)
 
 
-class JebaoFeedModeSensor(JebaoEntity, BinarySensorEntity):
-    """Binary sensor for feed mode status."""
+class JebaoBinarySensor(JebaoEntity, BinarySensorEntity):
+    """A boolean datapoint of the pump."""
 
-    _attr_device_class = BinarySensorDeviceClass.RUNNING
-    _attr_translation_key = "feed_mode"
+    entity_description: JebaoBinarySensorDescription
 
     def __init__(
         self,
         coordinator: JebaoDataUpdateCoordinator,
-        device_id: str,
-        model: str,
-        host: str,
-        mac_address: str | None = None,
-        firmware_version: str | None = None,
+        description: JebaoBinarySensorDescription,
     ) -> None:
         """Initialize sensor."""
-        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
-        self._attr_unique_id = f"{device_id}_feed_mode"
-        self._attr_name = "Feed mode"
+        super().__init__(coordinator, description.key)
+        self.entity_description = description
 
     @property
     def is_on(self) -> bool:
-        """Return true if in feed mode."""
-        return self.coordinator.data.get("is_feed_mode", False)
+        """Return the datapoint."""
+        return self.entity_description.is_on(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """List the active faults on the summary sensor."""
+        if self.entity_description.key == "problem":
+            return {"faults": list(self.coordinator.data.faults)}
+        return None

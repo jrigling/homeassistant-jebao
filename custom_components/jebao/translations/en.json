@@ -49,9 +49,11 @@
     "step": {
       "init": {
         "title": "Jebao Options",
-        "description": "Configure how often Home Assistant checks the pump status.\n\nLower values provide more responsive updates but increase network traffic.\n\nRecommended: 30 seconds (default)",
+        "description": "Pump model: nothing on the network tells these models apart (they report the same product key, and the Jebao app doesn't know the model either), so set it here.\n\nStatus update interval: lower values provide more responsive updates but increase network traffic. Recommended: 30 seconds (default).\n\nKeep the pump clock set: the pump's schedule runs on its own clock, which only the app's \"Set Time\" sets. With this on, Home Assistant sets it at startup, daily at 03:17, and before starting the schedule.",
         "data": {
-          "scan_interval": "Status update interval (10-300 seconds)"
+          "model": "Pump model",
+          "scan_interval": "Status update interval (10-300 seconds)",
+          "sync_clock": "Keep the pump clock set"
         }
       }
     }
@@ -65,6 +67,33 @@
     "binary_sensor": {
       "feed_mode": {
         "name": "Feed mode"
+      },
+      "problem": {
+        "name": "Problem"
+      },
+      "wireless_control": {
+        "name": "Wireless control"
+      },
+      "fault_overcurrent": {
+        "name": "Overcurrent"
+      },
+      "fault_overvoltage": {
+        "name": "Overvoltage"
+      },
+      "fault_overtemperature": {
+        "name": "Overtemperature"
+      },
+      "fault_undervoltage": {
+        "name": "Undervoltage"
+      },
+      "fault_locked_rotor": {
+        "name": "Pump stalled"
+      },
+      "fault_no_load": {
+        "name": "Running dry"
+      },
+      "fault_communication": {
+        "name": "Module communication fault"
       }
     },
     "button": {
@@ -73,11 +102,17 @@
       },
       "cancel_feed": {
         "name": "Cancel feed"
+      },
+      "sync_clock": {
+        "name": "Set pump clock"
       }
     },
     "number": {
       "feed_duration": {
         "name": "Feed duration"
+      },
+      "speed": {
+        "name": "Speed setting"
       }
     },
     "sensor": {
@@ -86,6 +121,41 @@
       },
       "state": {
         "name": "State"
+      },
+      "schedule_mode": {
+        "name": "Schedule mode",
+        "state": {
+          "off": "Stopped",
+          "run": "Running",
+          "feed": "Feeding"
+        }
+      },
+      "schedule_slots": {
+        "name": "Schedule slots"
+      },
+      "clock": {
+        "name": "Pump clock last set"
+      }
+    },
+    "switch": {
+      "schedule": {
+        "name": "Schedule"
+      }
+    }
+  },
+  "services": {
+    "set_schedule": {
+      "name": "Set schedule",
+      "description": "Replaces the pump's daily schedule (up to 48 time slots) and optionally turns it on or off. Slots must not overlap; one that ends before it starts runs past midnight.",
+      "fields": {
+        "slots": {
+          "name": "Slots",
+          "description": "List of slots: start and end (HH:MM, end may be 24:00), mode (run, feed or off; default run) and speed (30-100, for run slots; default 100). An empty list clears the schedule."
+        },
+        "enable": {
+          "name": "Enable",
+          "description": "Turn the schedule on (true) or off (false) afterwards. Leave out to keep it as it is."
+        }
       }
     }
   }
