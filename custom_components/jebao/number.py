@@ -1,21 +1,17 @@
 """Number platform for Jebao."""
 from __future__ import annotations
 
-import logging
-
-from jebao import JebaoError
+from jebao.datapoints import MAX_FEED_TIME, MIN_FEED_TIME
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
+from .const import DOMAIN, MAX_SPEED, MIN_SPEED
 from .coordinator import JebaoDataUpdateCoordinator
 from .entity import JebaoEntity
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -24,69 +20,34 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Jebao number entities from config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    device = data["device"]
-    device_id = data["device_id"]
-    model = data["model"]
-    host = data["host"]
-    mac_address = data.get("mac_address")
-    firmware_version = data.get("firmware_version")
-
-    coordinator: JebaoDataUpdateCoordinator = data["coordinator"]
-
-    # Create number entities
-    async_add_entities(
-        [
-            JebaoFeedDurationNumber(coordinator, device_id, model, host, device, mac_address, firmware_version),
-            JebaoSpeedNumber(coordinator, device_id, model, host, device, mac_address, firmware_version),
-        ]
-    )
+    coordinator: JebaoDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    async_add_entities([JebaoFeedDurationNumber(coordinator), JebaoSpeedNumber(coordinator)])
 
 
 class JebaoFeedDurationNumber(JebaoEntity, NumberEntity):
-    """Number entity for feed duration."""
+    """How long feed mode pauses the pump (the pump's FeedTime)."""
 
     _attr_translation_key = "feed_duration"
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
-    _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 1
-    _attr_native_max_value = 10
+    _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = MIN_FEED_TIME
+    _attr_native_max_value = MAX_FEED_TIME
     _attr_native_step = 1
+    _attr_icon = "mdi:timer"
 
-    def __init__(
-        self,
-        coordinator: JebaoDataUpdateCoordinator,
-        device_id: str,
-        model: str,
-        host: str,
-        device,
-        mac_address: str | None = None,
-        firmware_version: str | None = None,
-    ) -> None:
+    def __init__(self, coordinator: JebaoDataUpdateCoordinator) -> None:
         """Initialize number entity."""
-        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
-        self._device = device
-        self._attr_unique_id = f"{device_id}_feed_duration"
-        self._attr_name = "Feed duration"
-        self._attr_icon = "mdi:timer"
-        self._value = 1  # Default value
+        super().__init__(coordinator, "feed_duration")
 
     @property
-    def native_value(self) -> float:
-        """Return the current value."""
-        return self._value
+    def native_value(self) -> float | None:
+        """Return the pump's feed duration."""
+        return self.coordinator.data.feed_time
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set new value."""
-        try:
-            minutes = int(value)
-            await self._device.set_feed_duration(minutes)
-            self._value = minutes
-            self.async_write_ha_state()
-            _LOGGER.info("Feed duration set to %d minutes", minutes)
-
-        except JebaoError as err:
-            _LOGGER.error("Failed to set feed duration: %s", err)
+        """Set the feed duration (doesn't start feeding)."""
+        await self.coordinator.async_command(lambda device: device.set_feed_time(int(value)))
 
 
 class JebaoSpeedNumber(JebaoEntity, NumberEntity):
@@ -94,42 +55,26 @@ class JebaoSpeedNumber(JebaoEntity, NumberEntity):
 
     The fan entity rescales 30-100 onto 0-100 (speed 30 shows as 1%), which
     doesn't match the Jebao app; this sets the speed exactly as the app does.
+    Like the app's slider, setting it while the schedule runs ends the schedule.
     """
 
     _attr_translation_key = "speed"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 30
-    _attr_native_max_value = 100
+    _attr_native_min_value = MIN_SPEED
+    _attr_native_max_value = MAX_SPEED
     _attr_native_step = 1
+    _attr_icon = "mdi:speedometer"
 
-    def __init__(
-        self,
-        coordinator: JebaoDataUpdateCoordinator,
-        device_id: str,
-        model: str,
-        host: str,
-        device,
-        mac_address: str | None = None,
-        firmware_version: str | None = None,
-    ) -> None:
+    def __init__(self, coordinator: JebaoDataUpdateCoordinator) -> None:
         """Initialize number entity."""
-        super().__init__(coordinator, device_id, model, host, mac_address, firmware_version)
-        self._device = device
-        self._attr_unique_id = f"{device_id}_speed_setting"
-        self._attr_name = "Speed setting"
-        self._attr_icon = "mdi:speedometer"
+        super().__init__(coordinator, "speed_setting")
 
     @property
     def native_value(self) -> float | None:
         """Return the current speed."""
-        return self.coordinator.data.get("speed")
+        return self.coordinator.data.motor_speed
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the pump speed."""
-        try:
-            await self._device.set_speed(int(value))
-            await self.coordinator.async_request_refresh()
-
-        except JebaoError as err:
-            _LOGGER.error("Failed to set pump speed: %s", err)
+        await self.coordinator.async_command(lambda device: device.set_speed(int(value)))

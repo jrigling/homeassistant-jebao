@@ -9,18 +9,23 @@ Home Assistant custom integration for Jebao aquarium pumps with local network co
 - 🔌 **Local Control** - Direct control without cloud dependency
 - ⚡ **Real-Time Status** - Monitor pump state and speed
 - 🐟 **Feed Mode** - Temporary pump pause with auto-resume
+- 📅 **Pump Schedule** - Program and switch the pump's own 48-slot daily schedule, with its clock kept set
+- 🚨 **Faults** - Overcurrent, running dry, stall and the pump's other fault bits
 - 🏠 **Native HA Integration** - Configuration UI, device registry, etc.
 
 ## Supported Models
 
 - **Jebao MDP-20000** - Variable-speed circulation pump
 - **Jebao MDP-15000** - Variable-speed circulation pump (same protocol as the MDP-20000)
+- **Jebao MDP-5000** - Variable-speed circulation pump (same datapoints as the MDP-15000)
 - **Jebao MDP-3500** - Variable-speed circulation pump (same protocol; reported working in [#2](https://github.com/jrigling/homeassistant-jebao/issues/2))
 - **Jebao MDP-2500** - Likely the same protocol ([#1](https://github.com/jrigling/homeassistant-jebao/issues/1), unconfirmed)
 - **Jebao MD-4.4** - 4-channel dosing pump (planned)
 
-Some of these report the same product key, so discovery may label a pump MDP-20000. Pick the right model
-under **Configure** (Settings → Devices & services → Jebao).
+These pumps all report the same product key and datapoints, so nothing on the network says which model a
+pump is (the Jebao app doesn't know either). Discovery may label a pump MDP-20000: pick the right model
+under **Configure** (Settings → Devices & services → Jebao). To tell several pumps apart, rename their
+entries (the device takes the entry's name).
 
 ## Installation
 
@@ -84,32 +89,39 @@ During discovery:
 
 ## Entities
 
-After adding a pump, you'll get these entities:
+After adding a pump, you'll get these entities (IDs follow the device name):
 
-### Fan Entity (Primary Control)
-- **Entity ID:** `fan.jebao_pump`
-- **Controls:**
-  - Turn on/off
-  - Set speed (30-100%)
-- **Attributes:**
-  - Device state (OFF/ON/FEED/PROGRAM)
-  - Raw speed value
-  - Feed mode indicator
-
-### Binary Sensor
-- **Entity ID:** `binary_sensor.jebao_feed_mode`
-- **State:** On when pump is in feed mode
-
-### Buttons
-- **Start Feed:** `button.jebao_start_feed` - Start feed mode
-- **Cancel Feed:** `button.jebao_cancel_feed` - Cancel and resume
+### Fan (primary control)
+- On/off and speed. The fan's 1-100% maps onto the pump's 30-100%.
+- Attributes: device state (OFF/ON/FEED/PROGRAM), raw speed, feed mode, schedule
 
 ### Number
-- **Feed Duration:** `number.jebao_feed_duration` - Set duration (1-10 minutes)
+- **Speed setting** - Speed in the pump's own 30-100% units, as in the app. Like the app's slider,
+  setting it while the schedule runs ends the schedule.
+- **Feed duration** - How long feeding pauses the pump (1-60 minutes)
+
+### Switch
+- **Schedule** - Whether the pump follows its own daily schedule (the app's "Program"). The `slots`
+  attribute holds the schedule.
+
+### Buttons
+- **Start feed** - Pause the pump for the feed duration. As in the app, this turns the schedule off.
+- **Cancel feed** - End the pause early
+- **Set pump clock** - Set the pump's clock to Home Assistant's time
+
+### Binary sensors
+- **Feed mode** - On while feeding
+- **Problem** - On if the pump reports any fault (`faults` attribute lists them)
+- Per-fault sensors (overcurrent, overvoltage, overtemperature, undervoltage, pump stalled, running dry,
+  module communication) and **Wireless control** - diagnostic, disabled by default
 
 ### Sensors
-- **Speed:** `sensor.jebao_speed` - Current speed percentage
-- **State:** `sensor.jebao_state` - Current device state
+- **Speed** - Current speed percentage
+- **State** - OFF, ON, FEED or PROGRAM (on its schedule)
+- **Schedule mode** - What the schedule is doing now: running, feeding or stopped (unknown while the
+  schedule is off)
+- **Schedule slots** - Number of slots in the schedule (diagnostic)
+- **Pump clock last set** - What the pump's clock was last set to (diagnostic, disabled by default)
 
 ## Usage Examples
 
@@ -144,7 +156,7 @@ service: number.set_value
 target:
   entity_id: number.jebao_feed_duration
 data:
-  value: 2  # 2 minutes
+  value: 2  # 2 minutes (1-60)
 
 # Start feed
 service: button.press
@@ -156,6 +168,40 @@ service: button.press
 target:
   entity_id: button.jebao_cancel_feed
 ```
+
+### Pump Schedule
+
+The pump can run a daily schedule by itself, without Home Assistant: up to 48 time slots, each running
+at a speed (30-100%), pausing for feeding, or stopped. Set it with the `jebao.set_schedule` service,
+targeting the pump's **Schedule** switch:
+
+```yaml
+service: jebao.set_schedule
+target:
+  entity_id: switch.jebao_schedule
+data:
+  enable: true          # optional; leave out to keep the schedule on/off as it is
+  slots:
+    - start: "07:00"
+      end: "21:00"
+      speed: 80         # mode defaults to run
+    - start: "21:00"
+      end: "07:00"      # runs past midnight
+      speed: 40
+    - start: "12:00"    # slots must not overlap, so a feed pause splits a run slot
+      end: "12:15"
+      mode: feed
+```
+
+That example overlaps (12:00-12:15 is inside 07:00-21:00) and would be refused; split the day slot into
+07:00-12:00 and 12:15-21:00 instead. An empty `slots` list clears the schedule.
+
+The schedule runs on the pump's own clock, which nothing but the app's "Set Time" sets. With **Keep the
+pump clock set** on (the default, under Configure), Home Assistant sets it at startup, every night at 03:17
+(after any DST change), and before starting the schedule. **Set pump clock** does it on demand.
+
+The integration leaves the pump in whatever mode it finds it; older versions took it out of its schedule
+on every start.
 
 ### Automations
 
@@ -284,6 +330,7 @@ After adding the integration, you can configure:
 3. Click **Configure**
 4. Set the **Pump model** if discovery got it wrong
 5. Adjust **scan_interval** (10-300 seconds, default: 30)
+6. **Keep the pump clock set** (default on) - see [Pump Schedule](#pump-schedule)
 
 Lower intervals = more responsive, but more network traffic.
 
@@ -337,21 +384,15 @@ Lower intervals = more responsive, but more network traffic.
 **Problem:** Feed button has no effect
 
 **Solutions:**
-1. Ensure pump is in manual mode (not Program mode)
-2. Check pump is currently ON
-3. Set feed duration first (1-10 minutes)
-4. Check Home Assistant logs for error details
+1. Check pump is currently ON
+2. Check the feed duration (1-60 minutes)
+3. Check Home Assistant logs for error details
 
 ## Program Mode
 
-If your pump is in **Program mode** (schedule-based operation):
-
-- The integration will automatically exit Program mode on startup
-- This ensures manual control via Home Assistant works
-- Your pump's schedule is preserved but not active
-- You can re-enable Program mode from official app if desired
-
-**Best practice:** Use Home Assistant automations instead of pump's Program mode for better integration and flexibility.
+Program mode is the pump's own schedule: see [Pump Schedule](#pump-schedule). The integration no longer
+exits it on startup. Starting a feed or setting a manual speed ends it, as in the Jebao app; turn the
+**Schedule** switch back on to resume.
 
 ## IoT Network Considerations
 
