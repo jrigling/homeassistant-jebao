@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING, Any
+import zlib
 
 from jebao import JebaoError, MDP20000Device, discover_devices
 
@@ -33,6 +34,36 @@ PLATFORMS: list[Platform] = [
 
 # Periodic background discovery interval (UDP broadcast scan)
 DISCOVERY_INTERVAL = timedelta(minutes=5)
+
+# Each pump gets a fixed TCP source port from this range (see python-jebao:
+# a reconnect from the same port replaces a stale session on the pump instead
+# of using up one of its few session slots).
+LOCAL_PORT_BASE = 21000
+LOCAL_PORT_RANGE = 4000
+
+CONF_PASSCODE = "passcode"
+CONF_LOCAL_PORT = "local_port"
+
+
+def _assign_local_port(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Stable per-pump source port, unique among this integration's entries."""
+    if port := entry.data.get(CONF_LOCAL_PORT):
+        return port
+    used = {
+        e.data.get(CONF_LOCAL_PORT)
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.entry_id != entry.entry_id
+    }
+    key = (entry.data.get("device_id") or entry.entry_id).encode()
+    offset = zlib.crc32(key) % LOCAL_PORT_RANGE
+    port = LOCAL_PORT_BASE + offset
+    while port in used:
+        offset = (offset + 1) % LOCAL_PORT_RANGE
+        port = LOCAL_PORT_BASE + offset
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LOCAL_PORT: port}
+    )
+    return port
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -108,12 +139,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.info("Setting up Jebao device at %s", host)
 
-    device = MDP20000Device(host=host, device_id=device_id)
+    saved_passcode = entry.data.get(CONF_PASSCODE)
+    device = MDP20000Device(
+        host=host,
+        device_id=device_id,
+        passcode=bytes.fromhex(saved_passcode) if saved_passcode else None,
+        local_port=_assign_local_port(hass, entry),
+    )
 
+    # Setup only reads the pump. It used to force it out of its own schedule
+    # (Program mode) on every start; manual commands now do that when used.
     try:
         await device.connect()
-        # Exit Program mode if active so HA controls work as expected.
-        await device.ensure_manual_mode()
     except JebaoError as err:
         # HA logs ConfigEntryNotReady and retries with backoff; periodic
         # discovery updates entry.data[host] if the pump moved.

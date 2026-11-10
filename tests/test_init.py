@@ -130,8 +130,7 @@ async def test_set_speed_command(hass: HomeAssistant, pump):
 
 @pytest.mark.skipif(not os.environ.get("JEBAO_LIVE_HOST"), reason="set JEBAO_LIVE_HOST to run")
 async def test_live_pump_read_only(hass: HomeAssistant, socket_enabled):
-    """Against real hardware: setup + polls. Sends no control commands
-    (ensure_manual_mode only sends one if the pump is in Program mode)."""
+    """Against real hardware: setup + polls. Sends no control commands."""
     import pytest_socket
 
     host = os.environ["JEBAO_LIVE_HOST"]
@@ -144,3 +143,33 @@ async def test_live_pump_read_only(hass: HomeAssistant, socket_enabled):
         assert coordinator.last_update_success
         assert coordinator._consecutive_failures == 0
     assert fan_state(hass).state in ("on", "off")
+
+
+async def test_passcode_and_source_port_saved(hass: HomeAssistant, pump):
+    entry = make_entry()
+    other = MockConfigEntry(domain=DOMAIN, unique_id="other", data={CONF_HOST: "192.0.2.9"})
+    other.add_to_hass(hass)
+    await setup(hass, entry)
+    assert entry.data["passcode"] == b"ABCDEFGHIJ".hex()
+    port = entry.data["local_port"]
+    assert 21000 <= port < 25000
+    assert set(pump.peer_ports) == {port}
+
+    # After a restart the saved passcode is used: the pump isn't asked again,
+    # which matters once its post-power-up binding window has closed.
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
+    assert pump.passcode_requests == 1
+    assert entry.data["local_port"] == port
+
+
+async def test_setup_leaves_pump_schedule_alone(hass: HomeAssistant, pump):
+    pump.state = 0x18  # running its own schedule, currently in a stopped slot
+    entry = make_entry()
+    await setup(hass, entry)
+    assert pump.commands == []  # pre-0.2.1: EXIT_PROGRAM on every HA start
+    assert fan_state(hass).state == "off"
+    pump.state = 0x19  # schedule moves to a running slot
+    await tick(hass)
+    assert fan_state(hass).state == "on"

@@ -26,6 +26,8 @@ class FakePump:
         self.server = None
         self.port = None
         self.idle_close = None
+        self.passcode_requests = 0
+        self.peer_ports = []
 
     async def start(self):
         self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
@@ -51,6 +53,7 @@ class FakePump:
 
     async def _handle(self, reader, writer):
         self.connections += 1
+        self.peer_ports.append(writer.get_extra_info("peername")[1])
         fault = self.faults.pop(0) if self.faults else None
         try:
             if fault == "refuse":
@@ -61,6 +64,7 @@ class FakePump:
                 else:
                     cmd, payload = await self._read(reader)
                 if cmd == 0x0006:
+                    self.passcode_requests += 1
                     if fault == "stall_login":
                         await asyncio.sleep(2)
                     writer.write(build_frame(0x0007, b"\x00\x0a" + PASSCODE))

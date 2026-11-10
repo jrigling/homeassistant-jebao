@@ -59,6 +59,7 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     def _snapshot(self) -> dict[str, Any]:
+        self._save_passcode()
         return {
             "state": self.device.state,
             "speed": self.device.speed,
@@ -66,6 +67,14 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
             "is_feed_mode": self.device.is_feed_mode,
             "is_program_mode": self.device.is_program_mode,
         }
+
+    def _save_passcode(self) -> None:
+        """Keep the pump's passcode so HA can log in after its binding window."""
+        passcode = self.device.passcode
+        if passcode and self.entry.data.get("passcode") != passcode.hex():
+            self.hass.config_entries.async_update_entry(
+                self.entry, data={**self.entry.data, "passcode": passcode.hex()}
+            )
 
     def _sync_host(self) -> None:
         """Follow IP changes written to the entry by DHCP / periodic discovery."""

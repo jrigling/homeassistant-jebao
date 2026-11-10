@@ -48,7 +48,9 @@ async def pump(socket_enabled):
     await p.start()
     with patch(
         "custom_components.jebao.MDP20000Device",
-        lambda host, device_id=None: MDP20000Device(host, port=p.port, device_id=device_id),
+        lambda host, device_id=None, **kw: MDP20000Device(
+            host, port=p.port, device_id=device_id, **kw
+        ),
     ):
         yield p
     await p.stop()
