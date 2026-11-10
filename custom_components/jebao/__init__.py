@@ -15,7 +15,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .coordinator import JebaoDataUpdateCoordinator
 
 if TYPE_CHECKING:
     from homeassistant.helpers.entity import Entity
@@ -91,7 +92,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.async_create_background_task(
         _periodic_discovery(), "jebao_initial_discovery"
     )
-    async_track_time_interval(hass, _periodic_discovery, DISCOVERY_INTERVAL)
+    async_track_time_interval(
+        hass, _periodic_discovery, DISCOVERY_INTERVAL, cancel_on_shutdown=True
+    )
     return True
 
 
@@ -105,27 +108,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.info("Setting up Jebao device at %s", host)
 
-    # Create device instance
     device = MDP20000Device(host=host, device_id=device_id)
 
     try:
-        # Connect to device
         await device.connect()
-
-        # Ensure manual mode (exit Program mode if active)
+        # Exit Program mode if active so HA controls work as expected.
         await device.ensure_manual_mode()
-
-        _LOGGER.info("Successfully connected to Jebao device at %s", host)
-
     except JebaoError as err:
-        _LOGGER.error("Failed to connect to Jebao device at %s: %s", host, err)
-        await device.disconnect()
-        raise ConfigEntryNotReady(f"Failed to connect: {err}") from err
+        # HA logs ConfigEntryNotReady and retries with backoff; periodic
+        # discovery updates entry.data[host] if the pump moved.
+        raise ConfigEntryNotReady(f"Pump at {host} not reachable: {err}") from err
 
-    # Store device instance
+    coordinator = JebaoDataUpdateCoordinator(
+        hass,
+        device,
+        entry,
+        device_id,
+        entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL),
+    )
+    await coordinator.async_config_entry_first_refresh()
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "device": device,
+        "coordinator": coordinator,
         "host": host,
         "device_id": device_id,
         "model": model,
@@ -149,7 +155,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data = hass.data[DOMAIN].pop(entry.entry_id)
         device: MDP20000Device = data["device"]
         await device.disconnect()
-        _LOGGER.info("Disconnected from Jebao device at %s", data["host"])
+        _LOGGER.debug("Unloaded Jebao device at %s", data["host"])
 
     return unload_ok
 

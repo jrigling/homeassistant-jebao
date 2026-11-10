@@ -9,6 +9,7 @@ from jebao import JebaoError
 from homeassistant.components.fan import FanEntity, FanEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.percentage import (
     percentage_to_ranged_value,
@@ -39,15 +40,8 @@ async def async_setup_entry(
     mac_address = data.get("mac_address")
     firmware_version = data.get("firmware_version")
 
-    # Create coordinator
-    scan_interval = entry.options.get("scan_interval")
-    if scan_interval:
-        coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id, scan_interval)
-    else:
-        coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id)
-
-    # Fetch initial data
-    await coordinator.async_config_entry_first_refresh()
+    # Single shared coordinator, created in __init__.async_setup_entry
+    coordinator = data["coordinator"]
 
     # Create fan entity
     async_add_entities([JebaoPumpFan(coordinator, device_id, model, host, device, mac_address, firmware_version)])
@@ -127,7 +121,7 @@ class JebaoPumpFan(JebaoEntity, FanEntity):
             await self.coordinator.async_request_refresh()
 
         except JebaoError as err:
-            _LOGGER.error("Failed to turn on pump: %s", err)
+            raise HomeAssistantError(f"Failed to turn on pump: {err}") from err
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the pump."""
@@ -136,7 +130,7 @@ class JebaoPumpFan(JebaoEntity, FanEntity):
             await self.coordinator.async_request_refresh()
 
         except JebaoError as err:
-            _LOGGER.error("Failed to turn off pump: %s", err)
+            raise HomeAssistantError(f"Failed to turn off pump: {err}") from err
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the pump."""
@@ -151,4 +145,4 @@ class JebaoPumpFan(JebaoEntity, FanEntity):
             await self.coordinator.async_request_refresh()
 
         except JebaoError as err:
-            _LOGGER.error("Failed to set pump speed: %s", err)
+            raise HomeAssistantError(f"Failed to set pump speed: {err}") from err

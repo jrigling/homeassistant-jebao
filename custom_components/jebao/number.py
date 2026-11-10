@@ -9,6 +9,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_DEVICE_ID, CONF_MODEL, DOMAIN
@@ -32,17 +33,8 @@ async def async_setup_entry(
     mac_address = data.get("mac_address")
     firmware_version = data.get("firmware_version")
 
-    # Get or create coordinator
-    if "coordinator" not in data:
-        scan_interval = entry.options.get("scan_interval")
-        if scan_interval:
-            coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id, scan_interval)
-        else:
-            coordinator = JebaoDataUpdateCoordinator(hass, device, entry, device_id)
-        await coordinator.async_config_entry_first_refresh()
-        data["coordinator"] = coordinator
-    else:
-        coordinator = data["coordinator"]
+    # Single shared coordinator, created in __init__.async_setup_entry
+    coordinator = data["coordinator"]
 
     # Create number entities
     async_add_entities(
@@ -95,4 +87,4 @@ class JebaoFeedDurationNumber(JebaoEntity, NumberEntity):
             _LOGGER.info("Feed duration set to %d minutes", minutes)
 
         except JebaoError as err:
-            _LOGGER.error("Failed to set feed duration: %s", err)
+            raise HomeAssistantError(f"Failed to set feed duration: {err}") from err

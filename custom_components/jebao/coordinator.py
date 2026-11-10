@@ -1,9 +1,18 @@
 """Data update coordinator for Jebao."""
+from __future__ import annotations
+
 from datetime import timedelta
 import logging
-from typing import Optional
+import time
+from typing import Any, Optional
 
-from jebao import JebaoError, MDP20000Device, discover_devices
+from jebao import (
+    JebaoConnectionError,
+    JebaoError,
+    JebaoTimeoutError,
+    MDP20000Device,
+    discover_devices,
+)
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
@@ -14,9 +23,17 @@ from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+# The pumps are on Wi-Fi and occasionally miss a poll. Keep the last known
+# state for this many consecutive failed polls before going unavailable
+# (3 x 30 s = 90 s with the default interval).
+FAILURES_BEFORE_UNAVAILABLE = 3
+
+# Minimum time between discovery-based IP recovery attempts while unreachable.
+DISCOVERY_RECOVERY_INTERVAL = 300  # seconds
+
 
 class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching Jebao data."""
+    """Polls one pump. Exactly one instance per config entry."""
 
     def __init__(
         self,
@@ -30,111 +47,100 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
         self.device = device
         self.entry = entry
         self.device_id = device_id
-        self._discovery_attempted = False
+        self._consecutive_failures = 0
+        self._last_discovery = 0.0
 
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
+            config_entry=entry,
+            name=f"{DOMAIN} {entry.title}",
             update_interval=timedelta(seconds=scan_interval),
         )
 
-    async def _async_update_data(self) -> dict:
+    def _snapshot(self) -> dict[str, Any]:
+        return {
+            "state": self.device.state,
+            "speed": self.device.speed,
+            "is_on": self.device.is_on,
+            "is_feed_mode": self.device.is_feed_mode,
+            "is_program_mode": self.device.is_program_mode,
+        }
+
+    def _sync_host(self) -> None:
+        """Follow IP changes written to the entry by DHCP / periodic discovery."""
+        host = self.entry.data[CONF_HOST]
+        if self.device.host != host:
+            _LOGGER.info(
+                "%s: using new IP %s (was %s)", self.entry.title, host, self.device.host
+            )
+            self.device.host = host
+
+    async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from device."""
+        self._sync_host()
         try:
-            # Check if connection is alive, reconnect if needed
-            if not self.device.is_connected:
-                _LOGGER.warning("Connection lost, attempting to reconnect...")
-                try:
-                    await self.device.connect(timeout=5.0)
-                    _LOGGER.info("Reconnected successfully")
-                    self._discovery_attempted = False  # Reset flag on successful reconnect
-                except JebaoError as err:
-                    _LOGGER.error("Reconnection failed: %s", err)
-
-                    # Try discovery to find device with new IP
-                    new_ip = await self._try_discovery_recovery()
-                    if new_ip:
-                        # Update device with new IP and reconnect
-                        await self._reconnect_with_new_ip(new_ip)
-                    else:
-                        raise UpdateFailed(f"Failed to reconnect: {err}") from err
-
             await self.device.update()
-
-            return {
-                "state": self.device.state,
-                "speed": self.device.speed,
-                "is_on": self.device.is_on,
-                "is_feed_mode": self.device.is_feed_mode,
-                "is_program_mode": self.device.is_program_mode,
-            }
-
         except JebaoError as err:
-            raise UpdateFailed(f"Error communicating with device: {err}") from err
+            if isinstance(err, (JebaoConnectionError, JebaoTimeoutError)) and (
+                await self._try_discovery_recovery()
+            ):
+                try:
+                    await self.device.update()
+                except JebaoError as retry_err:
+                    err = retry_err
+                else:
+                    self._consecutive_failures = 0
+                    return self._snapshot()
 
-    async def _try_discovery_recovery(self) -> Optional[str]:
-        """Try to find device via discovery if IP changed.
+            self._consecutive_failures += 1
+            if (
+                self.data is not None
+                and self._consecutive_failures < FAILURES_BEFORE_UNAVAILABLE
+            ):
+                _LOGGER.debug(
+                    "%s: poll failed (%d/%d), keeping last state: %s",
+                    self.entry.title,
+                    self._consecutive_failures,
+                    FAILURES_BEFORE_UNAVAILABLE,
+                    err,
+                )
+                return self.data
+            raise UpdateFailed(f"Error communicating with pump: {err}") from err
 
-        Returns:
-            New IP address if found, None otherwise
-        """
-        if self._discovery_attempted:
-            _LOGGER.debug("Discovery already attempted this cycle, skipping")
-            return None
+        self._consecutive_failures = 0
+        return self._snapshot()
 
-        self._discovery_attempted = True
-        current_ip = self.entry.data[CONF_HOST]
-
-        _LOGGER.info("Attempting discovery to find device %s (current IP: %s)", self.device_id, current_ip)
+    async def _try_discovery_recovery(self) -> bool:
+        """If the pump moved to a new IP, point at it. Returns True if the IP changed."""
+        # Only after the pump has been missing for a bit, and rate-limited.
+        if self._consecutive_failures < 1:
+            return False
+        now = time.monotonic()
+        if now - self._last_discovery < DISCOVERY_RECOVERY_INTERVAL:
+            return False
+        self._last_discovery = now
 
         try:
-            devices = await discover_devices(timeout=10.0)
+            devices = await discover_devices(timeout=3.0)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Discovery failed: %s", err)
+            return False
 
-            # Find our device by device_id
-            for device in devices:
-                if device.device_id == self.device_id:
-                    if device.ip_address != current_ip:
-                        _LOGGER.warning(
-                            "Device %s found at new IP: %s (was: %s)",
-                            self.device_id,
-                            device.ip_address,
-                            current_ip
-                        )
-                        return device.ip_address
-                    else:
-                        _LOGGER.info("Device found at same IP %s", current_ip)
-                        return current_ip
+        new_ip: Optional[str] = next(
+            (d.ip_address for d in devices if d.device_id == self.device_id), None
+        )
+        if new_ip is None:
+            _LOGGER.debug("%s: not found by discovery", self.entry.title)
+            return False
+        if new_ip == self.device.host:
+            return False
 
-            _LOGGER.error("Device %s not found in discovery", self.device_id)
-            return None
-
-        except Exception as err:
-            _LOGGER.error("Discovery failed: %s", err)
-            return None
-
-    async def _reconnect_with_new_ip(self, new_ip: str) -> None:
-        """Update config entry and reconnect with new IP.
-
-        Args:
-            new_ip: New IP address for the device
-
-        Raises:
-            JebaoError: If reconnection fails
-        """
-        current_ip = self.entry.data[CONF_HOST]
-
-        # Update config entry with new IP
-        _LOGGER.info("Updating config entry IP from %s to %s", current_ip, new_ip)
-        new_data = dict(self.entry.data)
-        new_data[CONF_HOST] = new_ip
-        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-
-        # Update device instance with new IP
+        _LOGGER.warning(
+            "%s: found at new IP %s (was %s)", self.entry.title, new_ip, self.device.host
+        )
+        self.hass.config_entries.async_update_entry(
+            self.entry, data={**self.entry.data, CONF_HOST: new_ip}
+        )
         self.device.host = new_ip
-
-        # Reconnect
-        await self.device.disconnect()
-        await self.device.connect(timeout=5.0)
-        _LOGGER.info("Successfully reconnected to device at new IP %s", new_ip)
-        self._discovery_attempted = False  # Reset flag on successful reconnect
+        return True

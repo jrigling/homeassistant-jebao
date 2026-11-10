@@ -1,0 +1,3 @@
+pytest-homeassistant-custom-component
+# Use the local library when developing both together:
+#   pip install -e ../python-jebao
