@@ -16,12 +16,15 @@ from custom_components.jebao.const import DOMAIN
 DEVICE_ID = "t4RoEiuukqgYeC8hwF7QUS"
 
 
-def make_entry(host="127.0.0.1"):
+def make_entry(host="127.0.0.1", sync_clock=False):
+    # Clock sync off by default here: it writes to the pump at startup, which
+    # the tests that count commands don't expect (see test_features.py)
     return MockConfigEntry(
         domain=DOMAIN,
         unique_id=DEVICE_ID,
         title="Wetland pump 1",
         data={CONF_HOST: host, "device_id": DEVICE_ID, "model": "MDP-20000"},
+        options={"sync_clock": sync_clock},
     )
 
 

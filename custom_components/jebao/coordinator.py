@@ -1,25 +1,29 @@
 """Data update coordinator for Jebao."""
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 import logging
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from jebao import (
     JebaoConnectionError,
     JebaoError,
     JebaoTimeoutError,
     MDP20000Device,
+    PumpStatus,
     discover_devices,
 )
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_PASSCODE, DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,8 +36,11 @@ FAILURES_BEFORE_UNAVAILABLE = 3
 DISCOVERY_RECOVERY_INTERVAL = 300  # seconds
 
 
-class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
-    """Polls one pump. Exactly one instance per config entry."""
+class JebaoDataUpdateCoordinator(DataUpdateCoordinator[PumpStatus]):
+    """Polls one pump; data is its decoded status (every datapoint).
+
+    Exactly one instance per config entry.
+    """
 
     def __init__(
         self,
@@ -58,22 +65,19 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=scan_interval),
         )
 
-    def _snapshot(self) -> dict[str, Any]:
+    def _status(self) -> PumpStatus:
         self._save_passcode()
-        return {
-            "state": self.device.state,
-            "speed": self.device.speed,
-            "is_on": self.device.is_on,
-            "is_feed_mode": self.device.is_feed_mode,
-            "is_program_mode": self.device.is_program_mode,
-        }
+        status = self.device.status
+        if status is None:
+            raise UpdateFailed("Pump sent a status the integration couldn't decode")
+        return status
 
     def _save_passcode(self) -> None:
         """Keep the pump's passcode so HA can log in after its binding window."""
         passcode = self.device.passcode
-        if passcode and self.entry.data.get("passcode") != passcode.hex():
+        if passcode and self.entry.data.get(CONF_PASSCODE) != passcode.hex():
             self.hass.config_entries.async_update_entry(
-                self.entry, data={**self.entry.data, "passcode": passcode.hex()}
+                self.entry, data={**self.entry.data, CONF_PASSCODE: passcode.hex()}
             )
 
     def _sync_host(self) -> None:
@@ -85,7 +89,7 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
             )
             self.device.host = host
 
-    async def _async_update_data(self) -> dict[str, Any]:
+    async def _async_update_data(self) -> PumpStatus:
         """Fetch data from device."""
         self._sync_host()
         try:
@@ -100,7 +104,7 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
                     err = retry_err
                 else:
                     self._consecutive_failures = 0
-                    return self._snapshot()
+                    return self._status()
 
             self._consecutive_failures += 1
             if (
@@ -118,7 +122,40 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with pump: {err}") from err
 
         self._consecutive_failures = 0
-        return self._snapshot()
+        return self._status()
+
+    async def async_command(
+        self, command: Callable[[MDP20000Device], Awaitable[None]]
+    ) -> None:
+        """Run a control command and publish the pump's new state.
+
+        Raises:
+            HomeAssistantError: The pump didn't take the command
+        """
+        self._sync_host()
+        try:
+            await command(self.device)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+        except JebaoError as err:
+            raise HomeAssistantError(f"Pump command failed: {err}") from err
+        # Read the result straight away (the new value reads back at once).
+        # Publishing also restarts the poll timer, so publishing the status from
+        # before the command would hide the change for a whole interval.
+        try:
+            await self.device.update()
+        except JebaoError as err:
+            # The pump took the command, so don't report it as failed
+            _LOGGER.debug("Read-back from %s failed: %s", self.entry.title, err)
+            await self.async_request_refresh()
+            return
+        self._consecutive_failures = 0
+        self.async_set_updated_data(self._status())
+
+    async def async_sync_clock(self) -> None:
+        """Set the pump's clock (which its schedule runs on) to HA's local time."""
+        now = dt_util.now().replace(tzinfo=None)
+        await self.async_command(lambda device: device.set_clock(now))
 
     async def _try_discovery_recovery(self) -> bool:
         """If the pump moved to a new IP, point at it. Returns True if the IP changed."""

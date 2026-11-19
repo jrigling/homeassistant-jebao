@@ -6,7 +6,7 @@ from typing import Any
 
 import netifaces
 import voluptuous as vol
-from jebao import JebaoError, MDP20000Device, discover_devices
+from jebao import JebaoError, MDP20000Device, discover_devices, query_device
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST
@@ -19,9 +19,14 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_INTERFACES,
     CONF_MODEL,
+    CONF_SCAN_INTERVAL,
+    CONF_SYNC_CLOCK,
     DEFAULT_NAME,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SYNC_CLOCK,
     DOMAIN,
     MODEL_MDP20000,
+    SELECTABLE_MODELS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,10 +56,33 @@ async def validate_connection(hass: HomeAssistant, host: str) -> dict[str, Any]:
             "firmware_version": None,  # Not currently exposed by device
         }
 
-        return info
-
     finally:
         await device.disconnect()
+
+    # A direct connection doesn't reveal the pump's ID, MAC, or model, so ask the
+    # pump for its discovery reply (unicast, which also works across subnets), then
+    # fall back to a broadcast scan. Without this the entry is stored as device_id
+    # "unknown" and labeled MDP-20000 whatever the pump is.
+    devices = []
+    found = await query_device(host)
+    if found is not None:
+        devices = [found]
+    else:
+        try:
+            devices = await discover_devices(timeout=3.0)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Discovery lookup for %s failed: %s", host, err)
+    for found in devices:
+        if found.ip_address == host:
+            info.update(
+                device_id=found.device_id,
+                model=found.model,
+                mac_address=found.mac_address,
+                firmware_version=found.firmware_version,
+            )
+            break
+
+    return info
 
 
 class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -267,11 +295,9 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         entry.data.get(CONF_HOST),
                         ip,
                     )
+                    # The entry's update listener reloads it
                     self.hass.config_entries.async_update_entry(
                         entry, data={**entry.data, CONF_HOST: ip}
-                    )
-                    self.hass.async_create_task(
-                        self.hass.config_entries.async_reload(entry.entry_id)
                     )
                 return self.async_abort(reason="already_configured")
 
@@ -423,15 +449,11 @@ class JebaoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> JebaoOptionsFlow:
         """Get options flow handler."""
-        return JebaoOptionsFlow(config_entry)
+        return JebaoOptionsFlow()
 
 
 class JebaoOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Jebao."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -440,18 +462,26 @@ class JebaoOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        from .const import DEFAULT_SCAN_INTERVAL
+        entry = self.config_entry
+        model = entry.options.get(CONF_MODEL) or entry.data.get(CONF_MODEL)
+        if model not in SELECTABLE_MODELS:
+            model = MODEL_MDP20000
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_MODEL, default=model): vol.In(SELECTABLE_MODELS),
                     vol.Optional(
-                        "scan_interval",
-                        default=self.config_entry.options.get(
-                            "scan_interval", DEFAULT_SCAN_INTERVAL
+                        CONF_SCAN_INTERVAL,
+                        default=entry.options.get(
+                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
+                    vol.Optional(
+                        CONF_SYNC_CLOCK,
+                        default=entry.options.get(CONF_SYNC_CLOCK, DEFAULT_SYNC_CLOCK),
+                    ): bool,
                 }
             ),
         )
