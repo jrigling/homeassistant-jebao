@@ -1,6 +1,7 @@
 """Data update coordinator for Jebao."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 import logging
@@ -23,7 +24,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_PASSCODE, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    CONF_PASSCODE,
+    CONF_SYNC_CLOCK,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_SYNC_CLOCK,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +41,13 @@ FAILURES_BEFORE_UNAVAILABLE = 3
 
 # Minimum time between discovery-based IP recovery attempts while unreachable.
 DISCOVERY_RECOVERY_INTERVAL = 300  # seconds
+
+# A speed sent straight after power-on can leave the pump off, so wait for it to
+# report power on (reading every POWER_ON_POLL s, up to POWER_ON_TIMEOUT s), then
+# POWER_ON_SETTLE s more.
+POWER_ON_POLL = 1.0
+POWER_ON_TIMEOUT = 20.0
+POWER_ON_SETTLE = 3.0
 
 
 class JebaoDataUpdateCoordinator(DataUpdateCoordinator[PumpStatus]):
@@ -56,6 +70,9 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator[PumpStatus]):
         self.device_id = device_id
         self._consecutive_failures = 0
         self._last_discovery = 0.0
+        # Starting a feed turns the schedule off (as in the app); turn it back on
+        # once the feed is over. True while armed, "feeding" once the feed is seen.
+        self._resume_schedule: bool | str = False
 
         super().__init__(
             hass,
@@ -70,7 +87,31 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator[PumpStatus]):
         status = self.device.status
         if status is None:
             raise UpdateFailed("Pump sent a status the integration couldn't decode")
+        self._follow_feed(status)
         return status
+
+    def _follow_feed(self, status: PumpStatus) -> None:
+        """Resume the schedule when a feed that stopped it is over.
+
+        The feed ends on the pump's own timer (or Cancel feed), so this follows the
+        pump's status rather than a timer of its own.
+        """
+        if not self._resume_schedule:
+            return
+        if status.feed_switch:
+            self._resume_schedule = "feeding"
+        elif self._resume_schedule == "feeding":
+            self._resume_schedule = False
+            self.hass.async_create_background_task(
+                self._async_resume_schedule(), f"{DOMAIN} resume schedule {self.entry.title}"
+            )
+
+    async def _async_resume_schedule(self) -> None:
+        _LOGGER.info("%s: feed over, turning the schedule back on", self.entry.title)
+        try:
+            await self.async_set_schedule_enabled(True)
+        except HomeAssistantError as err:
+            _LOGGER.warning("%s: couldn't resume the schedule: %s", self.entry.title, err)
 
     def _save_passcode(self) -> None:
         """Keep the pump's passcode so HA can log in after its binding window."""
@@ -151,6 +192,59 @@ class JebaoDataUpdateCoordinator(DataUpdateCoordinator[PumpStatus]):
             return
         self._consecutive_failures = 0
         self.async_set_updated_data(self._status())
+
+    async def async_start_feed(self) -> None:
+        """Start a feed; if the schedule was running, resume it after the feed."""
+        was_scheduled = self.data is not None and self.data.timer_on
+        await self.async_command(lambda device: device.start_feed())
+        self._resume_schedule = was_scheduled and (
+            "feeding" if self.data.feed_switch else True
+        )
+
+    def cancel_schedule_resume(self) -> None:
+        """Someone chose what the schedule does: don't resume it after a feed."""
+        self._resume_schedule = False
+
+    async def async_set_schedule_enabled(self, enabled: bool) -> None:
+        """Start or stop the pump's own schedule (setting its clock first, if enabled)."""
+        self.cancel_schedule_resume()
+        if enabled and self.entry.options.get(CONF_SYNC_CLOCK, DEFAULT_SYNC_CLOCK):
+            await self.async_sync_clock()  # the schedule runs on the pump's clock
+        now = dt_util.now().replace(tzinfo=None)
+        await self.async_command(
+            lambda device: device.set_schedule_enabled(enabled, now=now)
+        )
+
+    async def async_turn_on(self, speed: int | None = None) -> None:
+        """Turn the pump on, then (once it's really on) set its speed."""
+
+        async def command(device: MDP20000Device) -> None:
+            if speed is None:
+                await device.turn_on()
+                return
+            # The last status may be stale (a read-back after turn-off can fail on
+            # weak Wi-Fi), so read it now; if that fails, assume the pump is off.
+            try:
+                await device.update()
+                was_on = device.is_on
+            except JebaoError:
+                was_on = False
+            if not was_on:
+                await device.turn_on()
+                deadline = time.monotonic() + POWER_ON_TIMEOUT
+                while time.monotonic() < deadline:
+                    try:
+                        await device.update()
+                    except JebaoError:
+                        pass
+                    else:
+                        if device.is_on:
+                            break
+                    await asyncio.sleep(POWER_ON_POLL)
+                await asyncio.sleep(POWER_ON_SETTLE)
+            await device.set_speed(speed)
+
+        await self.async_command(command)
 
     async def async_sync_clock(self) -> None:
         """Set the pump's clock (which its schedule runs on) to HA's local time."""

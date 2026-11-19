@@ -29,7 +29,11 @@ async def async_setup_entry(
 
 
 class JebaoStartFeedButton(JebaoEntity, ButtonEntity):
-    """Pause the pump for the feed duration (turns the schedule off, as the app does)."""
+    """Pause the pump for the feed duration.
+
+    Like the app, this turns the schedule off; unlike the app, the schedule is turned
+    back on when the feed is over.
+    """
 
     _attr_translation_key = "start_feed"
     _attr_icon = "mdi:fishbowl"
@@ -40,7 +44,7 @@ class JebaoStartFeedButton(JebaoEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle button press."""
-        await self.coordinator.async_command(lambda device: device.start_feed())
+        await self.coordinator.async_start_feed()
 
 
 class JebaoCancelFeedButton(JebaoEntity, ButtonEntity):

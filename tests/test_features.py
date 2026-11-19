@@ -12,7 +12,7 @@ from homeassistant.helpers import entity_registry as er
 
 from custom_components.jebao.const import DOMAIN
 
-from .test_init import DEVICE_ID, make_entry, setup
+from .test_init import DEVICE_ID, make_entry, setup, tick
 
 FLAGS = 8  # attribute flag bytes before the values in a write
 
@@ -132,3 +132,104 @@ async def test_model_option_names_the_device(hass: HomeAssistant, pump):
 
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, DEVICE_ID)})
     assert device.model == "MDP-15000"
+
+
+ON, FEED, SCHEDULE = 0x01, 0x04, 0x08
+
+
+async def test_schedule_resumes_after_feed(hass: HomeAssistant, pump):
+    """Starting a feed stops the schedule (as in the app); it's resumed afterwards."""
+    pump.state = 0x10 | ON | SCHEDULE
+
+    def on_command(payload):
+        opcode = payload[12]
+        if opcode == 0x28:  # leave the schedule
+            pump.state &= ~SCHEDULE
+        elif opcode == 0x4C:  # start feed
+            pump.state |= FEED
+        elif payload[4] == 0x01 and payload[5 + 7] & 0x08 and payload[5 + FLAGS] & 0x08:
+            pump.state |= SCHEDULE  # a write with TimerON on
+
+    pump.on_command = on_command
+    await setup(hass, make_entry())
+    schedule = entity_id(hass, "switch", "schedule")
+    await hass.services.async_call(
+        "button", "press", {"entity_id": entity_id(hass, "button", "start_feed")}, blocking=True
+    )
+    assert hass.states.get(schedule).state == "off"
+
+    pump.writes.clear()
+    await tick(hass)  # still feeding
+    assert pump.writes == []
+    pump.state &= ~FEED  # the feed timer runs out
+    await tick(hass, 62)
+    assert hass.states.get(schedule).state == "on"
+    assert len(pump.writes) == 1 and pump.writes[0][FLAGS] & 0x08
+
+
+async def test_feed_without_schedule_doesnt_start_it(hass: HomeAssistant, pump):
+    pump.on_command = lambda payload: setattr(pump, "state", pump.state | FEED)
+    await setup(hass, make_entry())
+    await hass.services.async_call(
+        "button", "press", {"entity_id": entity_id(hass, "button", "start_feed")}, blocking=True
+    )
+    pump.state &= ~FEED
+    pump.writes.clear()
+    await tick(hass)
+    assert pump.writes == []
+
+
+async def test_turn_on_with_speed_waits_for_power(hass: HomeAssistant, pump):
+    """A speed sent straight after power-on can leave the pump off."""
+    pump.state = 0x10
+    pump.on_command = lambda payload: (
+        setattr(pump, "state", pump.state | ON) if payload[12:14] == b"\x01\x01" else None
+    )
+    await setup(hass, make_entry())
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    with patch("custom_components.jebao.coordinator.asyncio.sleep", fake_sleep):
+        await hass.services.async_call(
+            "fan", "turn_on", {"entity_id": entity_id(hass, "fan", "fan"), "percentage": 100},
+            blocking=True,
+        )
+    assert pump.commands == [bytes([0x01, 0x01, 0, 0]), bytes([0x20, 0, 100, 0])]
+    assert slept == [3.0]  # the pump reported on at once, then the settle time
+
+
+async def test_turn_on_with_speed_doesnt_trust_a_stale_state(hass: HomeAssistant, pump):
+    """HA thinks the pump is on (a read-back failed), but it's off: turn it on first."""
+    await setup(hass, make_entry())  # reports on
+    pump.state = 0x10  # turned off since, unseen
+    pump.on_command = lambda payload: (
+        setattr(pump, "state", pump.state | ON) if payload[12:14] == b"\x01\x01" else None
+    )
+
+    async def fake_sleep(seconds):
+        pass
+
+    with patch("custom_components.jebao.coordinator.asyncio.sleep", fake_sleep):
+        await hass.services.async_call(
+            "fan", "turn_on", {"entity_id": entity_id(hass, "fan", "fan"), "percentage": 100},
+            blocking=True,
+        )
+    assert pump.commands == [bytes([0x01, 0x01, 0, 0]), bytes([0x20, 0, 100, 0])]
+
+
+async def test_turn_on_with_speed_when_on_just_sets_speed(hass: HomeAssistant, pump):
+    await setup(hass, make_entry())
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    with patch("custom_components.jebao.coordinator.asyncio.sleep", fake_sleep):
+        await hass.services.async_call(
+            "fan", "turn_on", {"entity_id": entity_id(hass, "fan", "fan"), "percentage": 100},
+            blocking=True,
+        )
+    assert pump.commands == [bytes([0x20, 0, 100, 0])]
+    assert slept == []

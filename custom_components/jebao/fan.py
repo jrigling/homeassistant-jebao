@@ -77,14 +77,9 @@ class JebaoPumpFan(JebaoEntity, FanEntity):
         preset_mode: str | None = None,
         **kwargs: Any,
     ) -> None:
-        """Turn on the pump."""
-
-        async def command(device) -> None:
-            await device.turn_on()
-            if percentage:
-                await device.set_speed(round(percentage_to_ranged_value(SPEED_RANGE, percentage)))
-
-        await self.coordinator.async_command(command)
+        """Turn on the pump, at a speed if one is given."""
+        speed = round(percentage_to_ranged_value(SPEED_RANGE, percentage)) if percentage else None
+        await self.coordinator.async_turn_on(speed)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the pump."""

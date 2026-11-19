@@ -69,13 +69,11 @@ class JebaoScheduleSwitch(JebaoEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Start the schedule."""
-        await self._async_sync_clock_if_enabled()
-        now = dt_util.now().replace(tzinfo=None)
-        await self.coordinator.async_command(lambda device: device.set_schedule_enabled(True, now=now))
+        await self.coordinator.async_set_schedule_enabled(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop the schedule; the pump keeps its current speed."""
-        await self.coordinator.async_command(lambda device: device.set_schedule_enabled(False))
+        await self.coordinator.async_set_schedule_enabled(False)
 
     async def async_set_schedule(self, slots: list[dict], enable: bool | None = None) -> None:
         """Replace the pump's schedule (the set_schedule service)."""
@@ -86,6 +84,7 @@ class JebaoScheduleSwitch(JebaoEntity, SwitchEntity):
             )
         except (KeyError, ValueError) as err:
             raise HomeAssistantError(f"Invalid schedule: {err}") from err
+        self.coordinator.cancel_schedule_resume()
         if enable or (enable is None and self.coordinator.data.timer_on):
             await self._async_sync_clock_if_enabled()
         now = dt_util.now().replace(tzinfo=None)
