@@ -21,6 +21,7 @@ class FakePump:
         self.faults = []
         self.connections = 0
         self.commands = []
+        self.writes = []  # attr flags + values of every 0x0093 frame
         self.state = 0x11
         self.speed = 70
         self.server = None
@@ -28,6 +29,7 @@ class FakePump:
         self.idle_close = None
         self.passcode_requests = 0
         self.peer_ports = []
+        self.on_command = None  # called with each 0x0093 payload, to change state
 
     async def start(self):
         self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
@@ -88,6 +90,9 @@ class FakePump:
                         writer.write(status_frame(self.state, self.speed))
                 elif cmd == 0x0093:
                     self.commands.append(payload[12:16])
+                    self.writes.append(payload[5:])
+                    if self.on_command:
+                        self.on_command(payload)
                     if fault == "drop_ack":
                         return
                     writer.write(build_frame(0x0094, b"\x00"))
